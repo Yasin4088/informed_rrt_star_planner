@@ -1,0 +1,4 @@
+ <launch>
+    <include file="$(find informed_rrt_star_planner)/launch/rviz.launch"/>
+    <include file="$(find informed_rrt_star_planner)/launch/swarm_large.launch"/>
+ </launch> 

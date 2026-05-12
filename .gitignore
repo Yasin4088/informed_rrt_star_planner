@@ -1,0 +1,8 @@
+.catkin_tools/
+.cursor/
+.marscode/
+.vscode/
+build/
+devel/
+images/
+scripts/

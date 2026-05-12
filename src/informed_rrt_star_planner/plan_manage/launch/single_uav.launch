@@ -1,0 +1,53 @@
+  <launch>
+    <arg name="map_size_x" value="100"/>
+    <arg name="map_size_y" value="100"/>
+    <arg name="map_size_z" value=" 5"/>
+
+    <!-- <arg name="odom_topic" value="vins_estimator/odometry" /> -->
+    <arg name="odom_topic" value="/iris_0/mavros/odometry/in" />
+
+    <!-- 强制设置MAVROS local_position TF发布: map -> base_link -->
+    <!-- 目的: 解决 odom/base_link 不连通，恢复 map/odom/base_link 单树结构 -->
+    <param name="/iris_0/mavros/local_position/tf/send" value="true" />
+    <param name="/iris_0/mavros/local_position/tf/send_fcu" value="false" />
+    <param name="/iris_0/mavros/local_position/tf/frame_id" value="map" />
+    <param name="/iris_0/mavros/local_position/tf/child_frame_id" value="base_link" />
+    <param name="/iris_0/mavros/local_position/frame_id" value="map" />
+
+    <!-- 静态TF: map → world → ground_plane -->
+    <node pkg="tf" type="static_transform_publisher" name="iris_0_map_to_world"
+    args="0.0 0.0 0 0.0 0.0 0.0 /map /world 40" />
+    <node pkg="tf" type="static_transform_publisher" name="iris_0_world_to_ground_plane"
+    args="0.0 0.0 0 0.0 0.0 0.0 /world /ground_plane 40" />
+
+    <!-- 静态TF: world → odom (桥接MAVROS EKF的odom坐标系与EGO-Planner的world坐标系) -->
+    <!-- MAVROS EKF发布的里程计使用frame_id="map"，child_frame_id="odom" -->
+    <!-- EGO-Planner使用frame_id="world"，需要world→odom的变换 -->
+    <node pkg="tf" type="static_transform_publisher" name="iris_0_world_to_odom"
+    args="0.0 0.0 0 0.0 0.0 0.0 /world /odom 40" />
+
+    <!-- 动态TF: 从MAVROS里程计补发 map -> base_link -->
+    <!-- /iris_0/mavros/odometry/in 已经包含 frame_id=map, child_frame_id=base_link，
+         但当前MAVROS没有把这条关系广播到/tf，导致base_link成为孤岛。 -->
+    <node pkg="uav_utils" type="odom_tf_broadcaster.py" name="iris_0_odom_to_base_link_tf" output="screen">
+        <param name="parent_frame" value="map" />
+        <param name="child_frame" value="base_link" />
+        <remap from="~odom" to="/iris_0/mavros/odometry/in" />
+    </node>
+
+    <include file="$(find informed_rrt_star_planner)/launch/run_in_xtdrone.launch">
+        <arg name="drone_id" value="0"/>
+
+        <arg name="target_x" value="-3"/>
+        <arg name="target_y" value="-3"/>
+        <arg name="target_z" value="2.0"/>
+
+        <arg name="map_size_x" value="$(arg map_size_x)"/>
+        <arg name="map_size_y" value="$(arg map_size_y)"/>
+        <arg name="map_size_z" value="$(arg map_size_z)"/>
+        <arg name="odom_topic" value="$(arg odom_topic)"/>
+    </include>
+
+
+
+  </launch>
