@@ -1,5 +1,7 @@
 #include "path_searching/informed_rrt_star.h"
 
+#include <cmath>
+
 using namespace std;
 using namespace Eigen;
 
@@ -12,7 +14,10 @@ InformedRRTstar::InformedRRTstar()
 	  solution_node_(NULL),
 	  best_cost_(numeric_limits<double>::infinity()),
 	  c_best_(numeric_limits<double>::infinity()),
+	  geom_best_(numeric_limits<double>::infinity()),
+	  ellipse_bound_(numeric_limits<double>::infinity()),
 	  c_min_(0.0),
+	  kd_size_(0),
 	  rrt_max_time_(0.25),
 	  opt_max_time_(0.10),
 	  max_iterations_(10000),
@@ -58,6 +63,9 @@ void InformedRRTstar::clearTree()
 	node_id_counter_ = 0;
 	solution_node_ = NULL;
 	best_cost_ = numeric_limits<double>::infinity();
+	geom_best_ = numeric_limits<double>::infinity();
+	ellipse_bound_ = numeric_limits<double>::infinity();
+	kd_size_ = 0;
 	kdtree_pts_.clear();
 	kdtree_idx_.clear();
 	id_to_node_.clear();
@@ -138,6 +146,55 @@ inline RRTNode *InformedRRTstar::kdTreeNearestNeighbor(const Vector3d &x)
 	return nodes_[best_node_id];
 }
 
+void InformedRRTstar::rebuildKdTreeFull()
+{
+	kd_size_ = (int)nodes_.size();
+	kdtree_pts_.resize(kd_size_);
+	kdtree_idx_.resize(kd_size_);
+	id_to_node_.clear();
+	for (int i = 0; i < kd_size_; ++i)
+	{
+		kdtree_pts_[i] = nodes_[i]->x;
+		kdtree_idx_[i] = i;
+		id_to_node_[nodes_[i]->id] = nodes_[i];
+	}
+	std::iota(kdtree_idx_.begin(), kdtree_idx_.end(), 0);
+	if (kd_size_ > 0)
+		kdTreeBuild(0, kd_size_ - 1, 0);
+}
+
+void InformedRRTstar::rebuildKdTreePtsOnly()
+{
+	kd_size_ = (int)nodes_.size();
+	kdtree_pts_.resize(kd_size_);
+	kdtree_idx_.resize(kd_size_);
+	for (int i = 0; i < kd_size_; ++i)
+	{
+		kdtree_pts_[i] = nodes_[i]->x;
+		kdtree_idx_[i] = i;
+	}
+	std::iota(kdtree_idx_.begin(), kdtree_idx_.end(), 0);
+	if (kd_size_ > 0)
+		kdTreeBuild(0, kd_size_ - 1, 0);
+}
+
+RRTNode *InformedRRTstar::nearestNodeForSampling(const Vector3d &x)
+{
+	if (nodes_.empty())
+		return NULL;
+	if ((int)nodes_.size() >= 40 && kd_size_ == (int)nodes_.size())
+		return kdTreeNearestNeighbor(x);
+	return nearestNeighborBruteForce(x);
+}
+
+double InformedRRTstar::solutionGeometricLength(RRTNode *goal) const
+{
+	double L = 0.0;
+	for (RRTNode *c = goal; c != NULL && c->parent != NULL; c = c->parent)
+		L += (c->x - c->parent->x).norm();
+	return L;
+}
+
 RRTNode *InformedRRTstar::nearestNeighborBruteForce(const Vector3d &x)
 {
 	if (nodes_.empty())
@@ -192,10 +249,17 @@ Vector3d InformedRRTstar::steer(const RRTNode *from, const Vector3d &to)
 
 Vector3d InformedRRTstar::sampleWorkspace()
 {
-  constexpr int MAX_ATTEMPTS = 20;
-  constexpr double MIN_SAFE_CLEARANCE = 0.5;  // 安全采样最小距离
+  constexpr int MAX_ATTEMPTS = 28;
+  constexpr double CLEAR_TARGET = 0.48;
+  constexpr double RAY_DELTA = 0.06;
+  constexpr double RAY_RANGE = 2.0;
 
-  // 首先尝试找到安全采样点
+  static const Vector3d AX6[6] = {
+       Vector3d(1, 0, 0), Vector3d(-1, 0, 0),
+       Vector3d(0, 1, 0), Vector3d(0, -1, 0),
+       Vector3d(0, 0, 1), Vector3d(0, 0, -1)};
+  const int ray_steps = std::max(2, (int)std::ceil(RAY_RANGE / RAY_DELTA));
+
   for (int attempt = 0; attempt < MAX_ATTEMPTS; ++attempt)
   {
     Vector3d x_sample(
@@ -203,29 +267,58 @@ Vector3d InformedRRTstar::sampleWorkspace()
       workspace_min_(1) + (workspace_max_(1) - workspace_min_(1)) * fastRand(),
       workspace_min_(2) + (workspace_max_(2) - workspace_min_(2)) * fastRand());
 
-    // 检查采样点是否被占据
     if (checkOccupancy(x_sample))
       continue;
 
-    // 检查安全裕量
     double clearance = queryClearance(x_sample);
-    if (clearance >= MIN_SAFE_CLEARANCE)
+    if (clearance >= CLEAR_TARGET)
       return x_sample;
+
+    // 沿±XYZ 射线找最近占据格，向障碍物外侧（远离占据方向）推出采样点，代价远低于 queryClearance 的 26 向
+    Vector3d outward = Vector3d::Zero();
+    double nearest_hit = std::numeric_limits<double>::infinity();
+    for (int di = 0; di < 6; ++di)
+    {
+      Vector3d p = x_sample;
+      for (int s = 1; s <= ray_steps; ++s)
+      {
+        p += AX6[di] * RAY_DELTA;
+        if (p(0) < workspace_min_(0) || p(0) > workspace_max_(0) ||
+            p(1) < workspace_min_(1) || p(1) > workspace_max_(1) ||
+            p(2) < workspace_min_(2) || p(2) > workspace_max_(2))
+          break;
+        if (checkOccupancy(p))
+        {
+          double d = s * RAY_DELTA;
+          if (d < nearest_hit)
+          {
+            nearest_hit = d;
+            outward = -AX6[di];
+          }
+          break;
+        }
+      }
+    }
+
+    if (outward.norm() < 1e-8)
+      continue;
+
+    outward.normalize();
+    const double stride =
+        std::max(RAY_DELTA * 2.0, CLEAR_TARGET - clearance + resolution_);
+
+    for (int k = 1; k <= 8; ++k)
+    {
+      Vector3d y = x_sample + outward * (stride * k);
+      for (int ax = 0; ax < 3; ++ax)
+        y(ax) = std::max(workspace_min_(ax), std::min(workspace_max_(ax), y(ax)));
+      if (checkOccupancy(y))
+        break;
+      if (queryClearance(y) >= CLEAR_TARGET)
+        return y;
+    }
   }
 
-  // 降级策略：找到任意空旷位置
-  for (int attempt = 0; attempt < MAX_ATTEMPTS; ++attempt)
-  {
-    Vector3d x_sample(
-      workspace_min_(0) + (workspace_max_(0) - workspace_min_(0)) * fastRand(),
-      workspace_min_(1) + (workspace_max_(1) - workspace_min_(1)) * fastRand(),
-      workspace_min_(2) + (workspace_max_(2) - workspace_min_(2)) * fastRand());
-
-    if (!checkOccupancy(x_sample))
-      return x_sample;
-  }
-
-  // 最后回退：沿多个方向从起点搜索可行点，避免硬编码 +x 穿入障碍
   ROS_WARN("[InformedRRT*] sampleWorkspace: falling back to search near start");
   Vector3d dir_goal = end_pt_ - start_pt_;
   if (dir_goal.norm() < 1e-6)
@@ -367,7 +460,7 @@ bool InformedRRTstar::sampleObstacleOutside(Eigen::Vector3d &x_sample)
 	Vector3d projected;
 	if (projectToObstacleOutside(obs_center, lateral, projected))
 	{
-		RRTNode *nearest = nearestNeighborBruteForce(projected);
+		RRTNode *nearest = nearestNodeForSampling(projected);
 		if (nearest == NULL || isSegmentFree(nearest->x, projected))
 		{
 			x_sample = projected;
@@ -400,7 +493,7 @@ bool InformedRRTstar::sampleObstacleOutside(Eigen::Vector3d &x_sample)
 		if (queryClearance(candidate) < MIN_OUTSIDE_CLEARANCE)
 			continue;
 
-		RRTNode *nearest = nearestNeighborBruteForce(candidate);
+		RRTNode *nearest = nearestNodeForSampling(candidate);
 		if (nearest != NULL && !isSegmentFree(nearest->x, candidate))
 			continue;
 
@@ -416,21 +509,22 @@ void InformedRRTstar::computeEllipse()
 	c_min_ = (end_pt_ - start_pt_).norm();
 	if (c_min_ < 1e-6)
 	{
-		c_best_ = 0.0;
 		center_ = start_pt_;
 		C_.setZero();
+		ellipse_bound_ = 0.0;
 		return;
 	}
 
 	center_ = (start_pt_ + end_pt_) / 2.0;
 
-	if (c_best_ <= c_min_)
+	ellipse_bound_ = std::isfinite(geom_best_) ? geom_best_ : c_best_;
+	if (!std::isfinite(ellipse_bound_) || ellipse_bound_ <= c_min_ + 1e-9)
 	{
 		C_.setZero();
 		return;
 	}
 
-	double a = c_best_ / 2.0;
+	double a = ellipse_bound_ / 2.0;
 	double c = c_min_ / 2.0;
 	double b = sqrt(max(0.0, a * a - c * c));
 
@@ -469,7 +563,7 @@ void InformedRRTstar::computeEllipse()
 
 Vector3d InformedRRTstar::sampleEllipse()
 {
-	if (c_best_ <= c_min_ || C_.isZero(0))
+	if (!std::isfinite(ellipse_bound_) || ellipse_bound_ <= c_min_ || C_.isZero(0))
 		return (start_pt_ + end_pt_) / 2.0;
 
 	Vector3d u;
@@ -485,42 +579,31 @@ Vector3d InformedRRTstar::sampleEllipse()
 	return center_ + C_ * u;
 }
 
-// ========== 新增：查询某点的安全裕量（距离最近障碍物的距离）==========
+// ========== Clearance: 6 face + 8 corner dirs (~half cost vs 26-dir); step tied to voxel ==========
 double InformedRRTstar::queryClearance(const Eigen::Vector3d &pos)
 {
 	if (checkOccupancy(pos))
 		return 0.0;
 
-	// 扩展为26方向检测（立方体6面 + 12边 + 8角）
-	constexpr int NUM_DIRS = 26;
-	constexpr double DELTA = 0.05;
-	constexpr double MAX_RANGE = 2.0;
-
-	Vector3d ray_dirs[NUM_DIRS] = {
-		// 6面
-		Vector3d(1, 0, 0), Vector3d(-1, 0, 0),
-		Vector3d(0, 1, 0), Vector3d(0, -1, 0),
+	static const Vector3d D14[14] = {
+		Vector3d(1, 0, 0), Vector3d(-1, 0, 0), Vector3d(0, 1, 0), Vector3d(0, -1, 0),
 		Vector3d(0, 0, 1), Vector3d(0, 0, -1),
-		// 12边
-		Vector3d(1, 1, 0), Vector3d(1, -1, 0), Vector3d(-1, 1, 0), Vector3d(-1, -1, 0),
-		Vector3d(1, 0, 1), Vector3d(1, 0, -1), Vector3d(-1, 0, 1), Vector3d(-1, 0, -1),
-		Vector3d(0, 1, 1), Vector3d(0, 1, -1), Vector3d(0, -1, 1), Vector3d(0, -1, -1),
-		// 8角
-		Vector3d(1, 1, 1), Vector3d(1, 1, -1), Vector3d(1, -1, 1), Vector3d(1, -1, -1),
-		Vector3d(-1, 1, 1), Vector3d(-1, 1, -1), Vector3d(-1, -1, 1), Vector3d(-1, -1, -1)
-	};
-	// 归一化所有射线方向
-	for (int i = 0; i < NUM_DIRS; ++i)
-		ray_dirs[i].normalize();
+		Vector3d(1, 1, 1).normalized(), Vector3d(1, 1, -1).normalized(), Vector3d(1, -1, 1).normalized(),
+		Vector3d(1, -1, -1).normalized(), Vector3d(-1, 1, 1).normalized(), Vector3d(-1, 1, -1).normalized(),
+		Vector3d(-1, -1, 1).normalized(), Vector3d(-1, -1, -1).normalized()};
+
+	const double delta = std::max(resolution_ * 0.5, 0.045);
+	constexpr double MAX_RANGE = 2.0;
+	const int max_steps = std::min(100, std::max(3, (int)std::ceil(MAX_RANGE / delta)));
 
 	double min_dist = MAX_RANGE;
 
-	for (int di = 0; di < NUM_DIRS; ++di)
+	for (int di = 0; di < 14; ++di)
 	{
 		Vector3d p = pos;
-		for (int step = 0; step < 40; ++step)
+		for (int step = 0; step < max_steps; ++step)
 		{
-			p += ray_dirs[di] * DELTA;
+			p += D14[di] * delta;
 
 			if (p(0) < workspace_min_(0) || p(0) > workspace_max_(0) ||
 				p(1) < workspace_min_(1) || p(1) > workspace_max_(1) ||
@@ -529,7 +612,7 @@ double InformedRRTstar::queryClearance(const Eigen::Vector3d &pos)
 
 			if (checkOccupancy(p))
 			{
-				min_dist = std::min(min_dist, (double)(step + 1) * DELTA);
+				min_dist = std::min(min_dist, (double)(step + 1) * delta);
 				break;
 			}
 		}
@@ -538,29 +621,25 @@ double InformedRRTstar::queryClearance(const Eigen::Vector3d &pos)
 	return min_dist;
 }
 
-// ========== 新增：查询两点之间路径的最小安全裕量 ==========
+// ========== Path clearance: adaptive samples along segment ==========
 double InformedRRTstar::queryPathClearance(const Eigen::Vector3d &p1, const Eigen::Vector3d &p2)
 {
-	constexpr double DELTA = 0.05;  // 路径采样步长
-	constexpr double MAX_SEGMENT_CHECKS = 100;  // 最大检查点数
-
 	double segment_length = (p2 - p1).norm();
 	if (segment_length < 1e-6)
 		return queryClearance(p1);
 
-	int num_checks = std::min((int)MAX_SEGMENT_CHECKS, (int)std::ceil(segment_length / DELTA));
+	const double delta_s = std::max(resolution_ * 0.85, std::min(0.12, segment_length / 28.0));
+	int num_checks = std::max(2, std::min(52, (int)std::ceil(segment_length / delta_s)));
 
 	double min_clearance = std::numeric_limits<double>::infinity();
+	const double early_exit = std::min(0.18, min_path_clearance_ * 0.45);
 
 	for (int i = 0; i <= num_checks; ++i)
 	{
 		double t = (double)i / num_checks;
 		Eigen::Vector3d p_sample = p1 + t * (p2 - p1);
-		double clearance = queryClearance(p_sample);
-		min_clearance = std::min(min_clearance, clearance);
-
-		// 如果已经发现太近的点，可以提前退出
-		if (min_clearance < 0.2)
+		min_clearance = std::min(min_clearance, queryClearance(p_sample));
+		if (min_clearance < early_exit)
 			break;
 	}
 
@@ -830,35 +909,25 @@ double InformedRRTstar::repulsivePotential(const Eigen::Vector3d &pos, Eigen::Ve
 		return apf_rep_gain_ * k * k;
 	}
 
-	// 斥力场射线检测：从6方向扩展到26方向（立方体6面 + 12边 + 8角）
-	constexpr int NUM_DIRS = 26;
-	constexpr double DELTA = 0.05;
-	Vector3d ray_dirs[NUM_DIRS] = {
-		// 6面
-		Vector3d(1, 0, 0), Vector3d(-1, 0, 0),
-		Vector3d(0, 1, 0), Vector3d(0, -1, 0),
+	static const Vector3d D14[14] = {
+		Vector3d(1, 0, 0), Vector3d(-1, 0, 0), Vector3d(0, 1, 0), Vector3d(0, -1, 0),
 		Vector3d(0, 0, 1), Vector3d(0, 0, -1),
-		// 12边
-		Vector3d(1, 1, 0), Vector3d(1, -1, 0), Vector3d(-1, 1, 0), Vector3d(-1, -1, 0),
-		Vector3d(1, 0, 1), Vector3d(1, 0, -1), Vector3d(-1, 0, 1), Vector3d(-1, 0, -1),
-		Vector3d(0, 1, 1), Vector3d(0, 1, -1), Vector3d(0, -1, 1), Vector3d(0, -1, -1),
-		// 8角
-		Vector3d(1, 1, 1), Vector3d(1, 1, -1), Vector3d(1, -1, 1), Vector3d(1, -1, -1),
-		Vector3d(-1, 1, 1), Vector3d(-1, 1, -1), Vector3d(-1, -1, 1), Vector3d(-1, -1, -1)
-	};
-	// 归一化所有射线方向
-	for (int i = 0; i < NUM_DIRS; ++i)
-		ray_dirs[i].normalize();
+		Vector3d(1, 1, 1).normalized(), Vector3d(1, 1, -1).normalized(), Vector3d(1, -1, 1).normalized(),
+		Vector3d(1, -1, -1).normalized(), Vector3d(-1, 1, 1).normalized(), Vector3d(-1, 1, -1).normalized(),
+		Vector3d(-1, -1, 1).normalized(), Vector3d(-1, -1, -1).normalized()};
+
+	const double delta = std::max(resolution_ * 0.5, 0.045);
+	const int max_steps = std::min(140, std::max(4, (int)std::ceil(apf_rep_radius_ / delta)));
 
 	double min_dist = numeric_limits<double>::infinity();
 	Vector3d closest_dir = Vector3d::Zero();
 
-	for (int di = 0; di < NUM_DIRS; ++di)
+	for (int di = 0; di < 14; ++di)
 	{
 		Vector3d p = pos;
-		for (int step = 0; step < 200; ++step)
+		for (int step = 0; step < max_steps; ++step)
 		{
-			p += ray_dirs[di] * DELTA;
+			p += D14[di] * delta;
 
 			if (p(0) < workspace_min_(0) || p(0) > workspace_max_(0) ||
 				p(1) < workspace_min_(1) || p(1) > workspace_max_(1) ||
@@ -867,11 +936,11 @@ double InformedRRTstar::repulsivePotential(const Eigen::Vector3d &pos, Eigen::Ve
 
 			if (checkOccupancy(p))
 			{
-				double d = (step + 1) * DELTA;
+				double d = (step + 1) * delta;
 				if (d < min_dist)
 				{
 					min_dist = d;
-					closest_dir = -ray_dirs[di];
+					closest_dir = -D14[di];
 				}
 				break;
 			}
@@ -1051,6 +1120,9 @@ bool InformedRRTstar::tryConnectToGoal(RRTNode *node)
 	solution_node_ = goal_node;
 	best_cost_ = new_cost;
 	c_best_ = new_cost;
+	double glen = solutionGeometricLength(goal_node);
+	if (!std::isfinite(geom_best_) || glen + 1e-7 < geom_best_)
+		geom_best_ = glen;
 	computeEllipse();
 	invalidatePathCache();
 	return true;
@@ -1303,6 +1375,8 @@ bool InformedRRTstar::InformedRRTstarSearch(const double step_size, Vector3d sta
 	c_min_ = (end_pt_ - start_pt_).norm();
 	c_best_ = numeric_limits<double>::infinity();
 	best_cost_ = numeric_limits<double>::infinity();
+	geom_best_ = numeric_limits<double>::infinity();
+	ellipse_bound_ = numeric_limits<double>::infinity();
 	solution_node_ = NULL;
 	computeEllipse();
 
@@ -1377,8 +1451,7 @@ bool InformedRRTstar::InformedRRTstarSearch(const double step_size, Vector3d sta
 		else
 			x_random = sampleWorkspace();
 
-		// Phase 1: brute-force nearest (tree is small, O(n) is fine)
-		RRTNode *x_nearest = nearestNeighborBruteForce(x_random);
+		RRTNode *x_nearest = nearestNodeForSampling(x_random);
 		if (x_nearest == NULL)
 			continue;
 
@@ -1408,6 +1481,9 @@ bool InformedRRTstar::InformedRRTstarSearch(const double step_size, Vector3d sta
 		x_nearest->addChild(x_new_node);
 		nodes_.push_back(x_new_node);
 		id_to_node_[x_new_node->id] = x_new_node;
+
+		if (nodes_.size() >= 48 && nodes_.size() % 28 == 0)
+			rebuildKdTreePtsOnly();
 
 		if (tryConnectToGoal(x_new_node))
 		{
@@ -1471,6 +1547,7 @@ bool InformedRRTstar::InformedRRTstarSearch(const double step_size, Vector3d sta
 					solution_node_ = virtual_goal;
 					best_cost_ = virtual_cost;
 					c_best_ = best_cost_;
+					geom_best_ = solutionGeometricLength(virtual_goal);
 					computeEllipse();
 					invalidatePathCache();
 					goal_reached = true;
@@ -1511,6 +1588,7 @@ bool InformedRRTstar::InformedRRTstarSearch(const double step_size, Vector3d sta
 				solution_node_ = partial;
 				best_cost_ = partial->cost;
 				c_best_ = best_cost_;
+				geom_best_ = solutionGeometricLength(partial) + dist_to_goal;
 				computeEllipse();
 				return true;
 			}
@@ -1519,18 +1597,7 @@ bool InformedRRTstar::InformedRRTstarSearch(const double step_size, Vector3d sta
 	}
 
 	// ========== PHASE 2: Build kd-tree ==========
-	kd_size_ = (int)nodes_.size();
-	kdtree_pts_.resize(kd_size_);
-	kdtree_idx_.resize(kd_size_);
-	id_to_node_.clear();
-	for (int i = 0; i < kd_size_; ++i)
-	{
-		kdtree_pts_[i] = nodes_[i]->x;
-		kdtree_idx_[i] = i;                  // store tree INDEX, not node id
-		id_to_node_[nodes_[i]->id] = nodes_[i]; // node id → node pointer map
-	}
-	std::iota(kdtree_idx_.begin(), kdtree_idx_.end(), 0); // reset to 0..kd_size_-1
-	kdTreeBuild(0, kd_size_ - 1, 0);
+	rebuildKdTreeFull();
 
 	ROS_INFO("[InformedRRT*] Phase 2: optimizing (kdtree nodes=%zu)...", nodes_.size());
 
@@ -1546,19 +1613,18 @@ bool InformedRRTstar::InformedRRTstarSearch(const double step_size, Vector3d sta
 			break;
 		}
 
-		if (c_best_ <= c_min_ + 1e-3)
+		if (std::isfinite(ellipse_bound_) && ellipse_bound_ <= c_min_ + 1e-3)
 			break;
 
 		Vector3d x_random;
-		if (fastRand() < 0.30 && sampleObstacleOutside(x_random))
+		double rs = fastRand();
+		if (rs < 0.13)
+			x_random = sampleWorkspace();
+		else if (rs < 0.13 + 0.27 && sampleObstacleOutside(x_random))
 		{
-			// Keep optimizing around the outside of the blocking obstacle.
 		}
 		else
-		{
-			// 使用安全的椭圆采样（带安全性检查）
 			x_random = sampleEllipseSafe();
-		}
 
 		for (int d = 0; d < 3; ++d)
 			x_random(d) = max(workspace_min_(d), min(workspace_max_(d), x_random(d)));
@@ -1597,22 +1663,8 @@ bool InformedRRTstar::InformedRRTstarSearch(const double step_size, Vector3d sta
 		nodes_.push_back(x_new_node);
 		id_to_node_[x_new_node->id] = x_new_node;
 
-		// Rebuild kd-tree every 50 nodes to include new nodes
-		if (nodes_.size() % 50 == 0)
-		{
-			kd_size_ = (int)nodes_.size();
-			kdtree_pts_.resize(kd_size_);
-			kdtree_idx_.resize(kd_size_);
-			id_to_node_.clear();
-			for (int i = 0; i < kd_size_; ++i)
-			{
-				kdtree_pts_[i] = nodes_[i]->x;
-				kdtree_idx_[i] = i;                  // store tree INDEX, not node id
-				id_to_node_[nodes_[i]->id] = nodes_[i]; // node id → node pointer map
-			}
-			std::iota(kdtree_idx_.begin(), kdtree_idx_.end(), 0); // reset to 0..kd_size_-1
-			kdTreeBuild(0, kd_size_ - 1, 0);
-		}
+		if (nodes_.size() % 56 == 0)
+			rebuildKdTreeFull();
 
 		tryConnectToGoal(x_new_node);
 		rewire(x_new_node);
@@ -1712,6 +1764,8 @@ void InformedRRTstar::tryShortcutPath()
 							solution_node_ = node_j;
 							best_cost_ = new_cost;
 							c_best_ = new_cost;
+							if (solution_node_ != NULL)
+								geom_best_ = solutionGeometricLength(solution_node_);
 							computeEllipse();
 						}
 

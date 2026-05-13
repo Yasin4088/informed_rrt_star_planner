@@ -18,6 +18,9 @@
   <!-- main algorithm params -->
   <include file="$(find informed_rrt_star_planner)/launch/advanced_param_xtdrone.xml">
 
+    <!-- 局部重规划触发更勤：EXEC_TRAJ 内约每 0.15s（原 0.35s）；过短易飘 / 爆 CPU -->
+    <arg name="thresh_replan_time" value="0.15"/>
+
     <arg name="drone_id" value="$(arg drone_id)"/>
 
     <arg name="map_size_x_" value="$(arg map_size_x)"/>
@@ -42,14 +45,15 @@
     <arg name="fx" value="554.254691191187"/>
     <arg name="fy" value="554.254691191187"/>
 
-    <!-- Conservative limits leave enough distance for local sensing, replanning, and braking. -->
-    <arg name="max_vel" value="0.6" />
-    <arg name="max_acc" value="1.2" />
 
-    <!-- Keep the local horizon close to the reliable depth/local-map range. -->
-    <arg name="planning_horizon" value="8.0" /> 
+    <arg name="max_vel" value="0.5" />
+    <arg name="max_acc" value="1.15" />
 
-    <arg name="use_distinctive_trajs" value="true" />
+    <!-- 抬高上限便于绕障时在 rebound 中取更长走廊；须与 grid 感知半径协调 -->
+    <arg name="planning_horizon" value="9.0" /> 
+
+    <!-- 单机飞行关闭多备选轨迹可减少相邻周期轨迹形状随机切换引起的飘移感。 -->
+    <arg name="use_distinctive_trajs" value="false" />
 
     <!-- 1: use 2D Nav Goal to select goal  -->
     <!-- 2: use global waypoints below  -->
@@ -87,7 +91,8 @@
     <remap from="pose_cmd" to="/xtdrone/iris_$(arg drone_id)/cmd_pose_enu"/>
     <remap from="~planning/bspline" to="/xtdrone/iris_$(arg drone_id)/planning/bspline"/>
 
-    <param name="traj_server/time_forward" value="0.5" type="double"/>
+    <!-- 重规划加密后略缩前瞻，使 pos_cmd 更贴当前 spline，与新轨迹切换更合拍（仍不宜 &lt;0.03）。 -->
+    <param name="traj_server/time_forward" value="0.42" type="double"/>
   </node>
 
   <!-- RViz drone body visualization, published as /drone_N_odom_visualization/robot. -->

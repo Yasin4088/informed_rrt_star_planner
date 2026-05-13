@@ -47,11 +47,4 @@ add_library( plan_env
 target_link_libraries( plan_env
     ${catkin_LIBRARIES} 
     ${PCL_LIBRARIES}
-    )  
-
-add_executable(obj_generator
-    src/obj_generator.cpp 
-)
-target_link_libraries(obj_generator 
-    ${catkin_LIBRARIES}
     )

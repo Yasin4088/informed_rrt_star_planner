@@ -18,6 +18,7 @@ namespace ego_planner
     nh.param("fsm/thresh_no_replan_meter", no_replan_thresh_, -1.0);
     nh.param("fsm/planning_horizon", planning_horizen_, -1.0);
     nh.param("fsm/planning_horizen_time", planning_horizen_time_, -1.0);
+    nh.param("fsm/local_horizon_min", local_horizon_min_, 3.5);
     nh.param("fsm/emergency_time", emergency_time_, 1.0);
     nh.param("fsm/goal_clearance", goal_clearance_, 0.35);
     nh.param("fsm/goal_search_radius", goal_search_radius_, 1.5);
@@ -1067,8 +1068,11 @@ namespace ego_planner
     const double braking_dist = safe_max_vel * safe_max_vel /
                                 (2.0 * std::max(planner_manager_->pp_.max_acc_, 1e-3));
     const double time_limited_horizon = planning_horizen_time_ * safe_max_vel;
+    /* along-global-traj lookahead: clamp between time*v+braking and planning_horizen_;
+       local_horizon_min_ exposes a floor (launch) so RViz optimal_list segment grows for detours */
     const double local_planning_horizon = std::min(planning_horizen_,
-                                                   std::max(2.0, time_limited_horizon + braking_dist));
+                                                     std::max(local_horizon_min_,
+                                                              time_limited_horizon + braking_dist));
 
     double t_step = local_planning_horizon / 20 / safe_max_vel;
     double dist_min = 9999, dist_min_t = 0.0;

@@ -88,6 +88,8 @@ private:
 	// Informed ellipse
 	double c_best_;
 	double c_min_;
+	double geom_best_;     // sum of Euclidean segment lengths along current best path (ellipse tightening)
+	double ellipse_bound_; // actual major-axis bound fed to ellipse geometry (geom-first, cost fallback)
 	Eigen::Vector3d center_;
 	Eigen::Matrix3d C_;
 
@@ -101,6 +103,11 @@ private:
 	void kdTreeNNRecursive(int left, int right, int depth, const Eigen::Vector3d &query,
 						   int &best_node_id, double &best_dist) const;
 	inline RRTNode *kdTreeNearestNeighbor(const Eigen::Vector3d &x);
+
+	void rebuildKdTreeFull();
+	void rebuildKdTreePtsOnly();
+	RRTNode *nearestNodeForSampling(const Eigen::Vector3d &x);
+	double solutionGeometricLength(RRTNode *goal) const;
 
 	// ===== Optimization 3: path cache + reuse buffers =====
 	bool path_cache_valid_;

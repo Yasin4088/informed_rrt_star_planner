@@ -6,6 +6,16 @@ PolynomialTraj PolynomialTraj::minSnapTraj(const Eigen::MatrixXd &Pos, const Eig
                                            const Eigen::Vector3d &end_acc, const Eigen::VectorXd &Time)
 {
   int seg_num = Time.size();
+  /*
+   * Segment durations from planner_manager are norm/max_vel based.
+   * Slightly lengthen before solving min-snap yields gentler corners on the global reference,
+   * which aligns better with a longer local lookahead (EGO FSM getLocalTarget).
+   */
+  constexpr double kWaypointSegTimeComfortScale = 1.18;
+  Eigen::VectorXd time_scaled = Time;
+  for (int k = 0; k < seg_num; ++k)
+    time_scaled(k) *= kWaypointSegTimeComfortScale;
+
   Eigen::MatrixXd poly_coeff(seg_num, 3 * 6);
   Eigen::VectorXd Px(6 * seg_num), Py(6 * seg_num), Pz(6 * seg_num);
 
@@ -67,7 +77,7 @@ PolynomialTraj PolynomialTraj::minSnapTraj(const Eigen::MatrixXd &Pos, const Eig
     {
       Ab(2 * i, i) = Factorial(i);
       for (int j = i; j < 6; j++)
-        Ab(2 * i + 1, j) = Factorial(j) / Factorial(j - i) * pow(Time(k), j - i);
+        Ab(2 * i + 1, j) = Factorial(j) / Factorial(j - i) * pow(time_scaled(k), j - i);
     }
     A.block(k * 6, k * 6, 6, 6) = Ab;
   }
@@ -119,7 +129,7 @@ PolynomialTraj PolynomialTraj::minSnapTraj(const Eigen::MatrixXd &Pos, const Eig
       for (int j = 3; j < 6; j++)
       {
         Q(k * 6 + i, k * 6 + j) =
-            i * (i - 1) * (i - 2) * j * (j - 1) * (j - 2) / (i + j - 5) * pow(Time(k), (i + j - 5));
+            i * (i - 1) * (i - 2) * j * (j - 1) * (j - 2) / (i + j - 5) * pow(time_scaled(k), (i + j - 5));
       }
     }
   }
@@ -177,7 +187,7 @@ PolynomialTraj PolynomialTraj::minSnapTraj(const Eigen::MatrixXd &Pos, const Eig
     reverse(cx.begin(), cx.end());
     reverse(cy.begin(), cy.end());
     reverse(cz.begin(), cz.end());
-    double ts = Time(i);
+    double ts = time_scaled(i);
     poly_traj.addSegment(cx, cy, cz, ts);
   }
 
