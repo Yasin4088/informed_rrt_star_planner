@@ -18,8 +18,7 @@
   <!-- main algorithm params -->
   <include file="$(find informed_rrt_star_planner)/launch/advanced_param_xtdrone.xml">
 
-    <!-- 局部重规划触发更勤：EXEC_TRAJ 内约每 0.15s（原 0.35s）；过短易飘 / 爆 CPU -->
-    <arg name="thresh_replan_time" value="0.15"/>
+    <arg name="thresh_replan_time" value="0.25"/>
 
     <arg name="drone_id" value="$(arg drone_id)"/>
 
@@ -49,8 +48,7 @@
     <arg name="max_vel" value="0.5" />
     <arg name="max_acc" value="1.15" />
 
-    <!-- 抬高上限便于绕障时在 rebound 中取更长走廊；须与 grid 感知半径协调 -->
-    <arg name="planning_horizon" value="9.0" /> 
+    <arg name="planning_horizon" value="6.0" /> 
 
     <!-- 单机飞行关闭多备选轨迹可减少相邻周期轨迹形状随机切换引起的飘移感。 -->
     <arg name="use_distinctive_trajs" value="false" />

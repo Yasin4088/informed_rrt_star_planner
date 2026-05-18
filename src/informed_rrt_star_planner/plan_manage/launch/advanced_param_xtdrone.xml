@@ -36,8 +36,7 @@
 
   <arg name="flight_type"/>
   <arg name="use_distinctive_trajs"/>
-  <!-- FSM：EXEC_TRAJ 上当已执行轨迹时间 t_cur > 该阈值则触发 REPLAN，数值越小相邻两次局部规划间隔越短（CPU↑，可能更易抖）。 -->
-  <arg name="thresh_replan_time" default="0.15"/>
+  <arg name="thresh_replan_time"/>
 
   <arg name="obj_num_set"/>
 
@@ -111,7 +110,7 @@
     <param name="grid_map/local_update_range_x"  value="7" /> 
     <param name="grid_map/local_update_range_y"  value="7" /> 
     <param name="grid_map/local_update_range_z"  value="3" /> 
-    <param name="grid_map/obstacles_inflation"     value="0.15" /> 
+    <param name="grid_map/obstacles_inflation"     value="0.16" /> 
     <param name="grid_map/local_map_margin" value="10"/>
     <param name="grid_map/ground_height"        value="-1"/>
     <!-- camera parameter -->
