@@ -144,15 +144,15 @@ private:
 	void computeEllipse();
 	Eigen::Vector3d sampleEllipse();
 	Eigen::Vector3d sampleWorkspace();
-	Eigen::Vector3d sampleEllipseSafe();  // 新增：带安全性检查的椭圆采样
+	Eigen::Vector3d sampleEllipseSafe();  //带安全性检查的椭圆采样
 	bool findBlockingObstacle(const Eigen::Vector3d &from, const Eigen::Vector3d &to,
 							  Eigen::Vector3d &obs_center, Eigen::Vector3d &path_dir);
 	bool projectToObstacleOutside(const Eigen::Vector3d &obs_pos, const Eigen::Vector3d &preferred_dir,
 								  Eigen::Vector3d &outside_pt);
 	bool sampleObstacleOutside(Eigen::Vector3d &x_sample);
-	double queryClearance(const Eigen::Vector3d &pos);  // 新增：查询某点安全裕量
-	double queryPathClearance(const Eigen::Vector3d &p1, const Eigen::Vector3d &p2);  // 新增：查询路径安全裕量
-	double evaluatePathClearance(RRTNode *node);  // 新增：评估路径安全性
+	double queryClearance(const Eigen::Vector3d &pos);  // 查询某点安全裕量
+	double queryPathClearance(const Eigen::Vector3d &p1, const Eigen::Vector3d &p2);  // 查询路径安全裕量
+	double evaluatePathClearance(RRTNode *node);  // 评估路径安全性
 	double evaluateForwardClearance(RRTNode *node, const Eigen::Vector3d &final_pt);
 	bool findNearestFreePoint(const Eigen::Vector3d &origin, const Eigen::Vector3d &preferred_dir,
 							  double max_radius, double min_clearance, Eigen::Vector3d &free_pt);

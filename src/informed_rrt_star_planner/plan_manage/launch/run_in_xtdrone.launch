@@ -44,7 +44,6 @@
     <arg name="fx" value="554.254691191187"/>
     <arg name="fy" value="554.254691191187"/>
 
-
     <arg name="max_vel" value="0.5" />
     <arg name="max_acc" value="1.15" />
 

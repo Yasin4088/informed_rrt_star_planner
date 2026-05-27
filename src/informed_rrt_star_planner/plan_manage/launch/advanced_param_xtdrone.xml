@@ -42,7 +42,6 @@
 
   <arg name="drone_id"/>
 
-
   <!-- main node -->
   <!-- <node pkg="informed_rrt_star_planner" name="ego_planner_node" type="ego_planner_node" output="screen" launch-prefix="valgrind"> -->
   <node pkg="informed_rrt_star_planner" name="iris_$(arg drone_id)_ego_planner_node" type="ego_planner_node" output="screen">
@@ -173,9 +172,6 @@
     <param name="prediction/obj_num" value="$(arg obj_num_set)" type="int"/>
     <param name="prediction/lambda" value="1.0" type="double"/>
     <param name="prediction/predict_rate" value="1.0" type="double"/>
-  
-  
-
 
   </node>
 
