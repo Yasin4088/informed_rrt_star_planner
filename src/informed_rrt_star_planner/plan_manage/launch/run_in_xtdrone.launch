@@ -86,10 +86,17 @@
   <node pkg="informed_rrt_star_planner" name="iris_$(arg drone_id)_traj_server" type="traj_server" output="screen">
     <remap from="position_cmd" to="/xtdrone/iris_$(arg drone_id)/planning/pos_cmd"/>
     <remap from="pose_cmd" to="/xtdrone/iris_$(arg drone_id)/cmd_pose_enu"/>
+    <remap from="~odom" to="$(arg odom_topic)"/>
     <remap from="~planning/bspline" to="/xtdrone/iris_$(arg drone_id)/planning/bspline"/>
+    <remap from="~flown_path" to="/xtdrone/iris_$(arg drone_id)/planning/flown_path"/>
 
     <!-- 重规划加密后略缩前瞻，使 pos_cmd 更贴当前 spline，与新轨迹切换更合拍（仍不宜 &lt;0.03）。 -->
     <param name="traj_server/time_forward" value="0.42" type="double"/>
+    <param name="traj_server/path_sample_dist" value="0.08" type="double"/>
+    <param name="traj_server/path_sample_dt" value="0.12" type="double"/>
+    <param name="traj_server/path_max_points" value="8000" type="int"/>
+    <!-- false: 保留全程飞行历史；true: 每次重规划后清空，仅显示当前段 -->
+    <param name="traj_server/path_reset_on_new_traj" value="false" type="bool"/>
   </node>
 
   <!-- RViz drone body visualization, published as /drone_N_odom_visualization/robot. -->

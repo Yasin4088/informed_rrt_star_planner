@@ -1,14 +1,17 @@
 #include "bspline_opt/uniform_bspline.h"
 #include "nav_msgs/Odometry.h"
+#include "nav_msgs/Path.h"
 #include "traj_utils/Bspline.h"
 #include "quadrotor_msgs/PositionCommand.h"
 #include "geometry_msgs/Pose.h"
+#include "geometry_msgs/PoseStamped.h"
 #include "std_msgs/Empty.h"
 #include "visualization_msgs/Marker.h"
 #include <ros/ros.h>
 
 ros::Publisher pos_cmd_pub;
 ros::Publisher pose_cmd_pub;
+ros::Publisher flown_path_pub;
 
 quadrotor_msgs::PositionCommand cmd;
 geometry_msgs::Pose pose_cmd;
@@ -22,6 +25,15 @@ vector<UniformBspline> traj_;
 double traj_duration_;
 ros::Time start_time_;
 int traj_id_;
+
+nav_msgs::Path flown_path_;
+bool has_path_seed_ = false;
+Eigen::Vector3d last_path_pos_ = Eigen::Vector3d::Zero();
+ros::Time last_path_time_;
+double path_sample_dist_;
+double path_sample_dt_;
+int path_max_points_;
+bool path_reset_on_new_traj_;
 
 // yaw control
 double last_yaw_, last_yaw_dot_;
@@ -69,6 +81,52 @@ void bsplineCallback(traj_utils::BsplineConstPtr msg)
   traj_duration_ = traj_[0].getTimeSum();
 
   receive_traj_ = true;
+
+  if (path_reset_on_new_traj_)
+  {
+    flown_path_.poses.clear();
+    has_path_seed_ = false;
+  }
+}
+
+void odomCallback(const nav_msgs::OdometryConstPtr &msg)
+{
+  geometry_msgs::PoseStamped pose_stamped;
+  pose_stamped.header = msg->header;
+  pose_stamped.header.frame_id = msg->header.frame_id.empty() ? "map" : msg->header.frame_id;
+  pose_stamped.pose = msg->pose.pose;
+
+  Eigen::Vector3d cur_pos(msg->pose.pose.position.x, msg->pose.pose.position.y, msg->pose.pose.position.z);
+  const ros::Time cur_time = msg->header.stamp.isZero() ? ros::Time::now() : msg->header.stamp;
+
+  bool should_append = false;
+  if (!has_path_seed_)
+  {
+    should_append = true;
+  }
+  else
+  {
+    const double dist = (cur_pos - last_path_pos_).norm();
+    const double dt = (cur_time - last_path_time_).toSec();
+    should_append = (dist >= path_sample_dist_) || (dt >= path_sample_dt_);
+  }
+
+  if (!should_append)
+    return;
+
+  flown_path_.header = pose_stamped.header;
+  flown_path_.poses.push_back(pose_stamped);
+  has_path_seed_ = true;
+  last_path_pos_ = cur_pos;
+  last_path_time_ = cur_time;
+
+  if (path_max_points_ > 0 && static_cast<int>(flown_path_.poses.size()) > path_max_points_)
+  {
+    const int overflow = static_cast<int>(flown_path_.poses.size()) - path_max_points_;
+    flown_path_.poses.erase(flown_path_.poses.begin(), flown_path_.poses.begin() + overflow);
+  }
+
+  flown_path_pub.publish(flown_path_);
 }
 
 std::pair<double, double> calculate_yaw(double t_cur, Eigen::Vector3d &pos, ros::Time &time_now, ros::Time &time_last)
@@ -250,9 +308,11 @@ int main(int argc, char **argv)
   ros::NodeHandle nh("~");
 
   ros::Subscriber bspline_sub = nh.subscribe("planning/bspline", 10, bsplineCallback);
+  ros::Subscriber odom_sub = nh.subscribe("odom", 200, odomCallback);
 
   pos_cmd_pub = nh.advertise<quadrotor_msgs::PositionCommand>("/position_cmd", 50);
   pose_cmd_pub = nh.advertise<geometry_msgs::Pose>("/pose_cmd", 50);
+  flown_path_pub = nh.advertise<nav_msgs::Path>("flown_path", 10, true);
 
   ros::Timer cmd_timer = nh.createTimer(ros::Duration(0.01), cmdCallback);
 
@@ -266,6 +326,10 @@ int main(int argc, char **argv)
   cmd.kv[2] = vel_gain[2];
 
   nh.param("traj_server/time_forward", time_forward_, -1.0);
+  nh.param("traj_server/path_sample_dist", path_sample_dist_, 0.05);
+  nh.param("traj_server/path_sample_dt", path_sample_dt_, 0.10);
+  nh.param("traj_server/path_max_points", path_max_points_, 5000);
+  nh.param("traj_server/path_reset_on_new_traj", path_reset_on_new_traj_, false);
   last_yaw_ = 0.0;
   last_yaw_dot_ = 0.0;
 
