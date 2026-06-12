@@ -1,12 +1,37 @@
-.catkin_tools/
-.cursor/
-.marscode/
-.vscode/
-build/
-devel/
-images/
-faster-lio/
-livox_laser_simulation/
-livox_ros_driver2/
-Livox-SDK2/
-scripts/
+# ===== Catkin build artifacts =====
+/.catkin_tools/
+/.catkin_workspace
+/build/
+/devel/
+/install/
+/logs/
+
+# ===== IDE / editor =====
+/.cursor/
+/.vscode/
+/.idea/
+
+# ===== Runtime cache / temp =====
+**/__pycache__/
+*.pyc
+*.pyo
+*.swp
+*.swo
+*~
+*.tmp
+*.log
+
+# ===== ROS runtime data =====
+*.bag
+*.active
+
+# ===== Media / outputs =====
+/images/
+/videos/
+
+# ===== Third-party packages under src (do not track) =====
+/src/faster-lio/
+/src/livox_laser_simulation/
+/src/livox_ros_driver2/
+/src/Livox-SDK2/
+/src/VINS-Fusion/
