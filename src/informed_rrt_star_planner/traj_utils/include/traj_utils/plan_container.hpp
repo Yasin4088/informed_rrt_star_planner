@@ -10,7 +10,7 @@
 
 using std::vector;
 
-namespace ego_planner
+namespace informed_rrt_star_planner
 {
 
   class GlobalTrajData
@@ -228,6 +228,6 @@ namespace ego_planner
 
   typedef std::vector<OneTrajDataOfSwarm> SwarmTrajData;
 
-} // namespace ego_planner
+} // namespace informed_rrt_star_planner
 
 #endif

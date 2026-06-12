@@ -3,16 +3,16 @@
 #include <thread>
 #include "visualization_msgs/Marker.h" // zx-todo
 
-namespace ego_planner
+namespace informed_rrt_star_planner
 {
 
   // SECTION interfaces for setup and query
 
-  EGOPlannerManager::EGOPlannerManager() {}
+  InformedRRTStarPlannerManager::InformedRRTStarPlannerManager() {}
 
-  EGOPlannerManager::~EGOPlannerManager() { }
+  InformedRRTStarPlannerManager::~InformedRRTStarPlannerManager() { }
 
-  void EGOPlannerManager::initPlanModules(ros::NodeHandle &nh, PlanningVisualization::Ptr vis)
+  void InformedRRTStarPlannerManager::initPlanModules(ros::NodeHandle &nh, PlanningVisualization::Ptr vis)
   {
     /* read algorithm parameters */
 
@@ -52,7 +52,7 @@ namespace ego_planner
 
   // SECTION rebond replanning
 
-  bool EGOPlannerManager::reboundReplan(Eigen::Vector3d start_pt, Eigen::Vector3d start_vel,
+  bool InformedRRTStarPlannerManager::reboundReplan(Eigen::Vector3d start_pt, Eigen::Vector3d start_vel,
                                         Eigen::Vector3d start_acc, Eigen::Vector3d local_target_pt,
                                         Eigen::Vector3d local_target_vel, bool flag_polyInit, bool flag_randomPolyTraj)
   {
@@ -385,7 +385,8 @@ namespace ego_planner
     cout << "plan_success=" << flag_step_1_success << endl;
     if (!flag_step_1_success)
     {
-      visualization_->displayOptimalList(ctrl_pts, 0);
+      // Keep previous valid red path in RViz when current planning fails.
+      // Do not publish failed/intermediate control points to optimal_list.
       continous_failures_count_++;
       return false;
     }
@@ -447,7 +448,7 @@ namespace ego_planner
     return true;
   }
 
-  bool EGOPlannerManager::EmergencyStop(Eigen::Vector3d stop_pos)
+  bool InformedRRTStarPlannerManager::EmergencyStop(Eigen::Vector3d stop_pos)
   {
     Eigen::MatrixXd control_points(3, 6);
     for (int i = 0; i < 6; i++)
@@ -460,7 +461,7 @@ namespace ego_planner
     return true;
   }
 
-  bool EGOPlannerManager::checkCollision(int drone_id)
+  bool InformedRRTStarPlannerManager::checkCollision(int drone_id)
   {
     if ( local_data_.start_time_.toSec() < 1e9 ) // It means my first planning has not started
       return false;
@@ -482,7 +483,7 @@ namespace ego_planner
     return false;
   }
 
-  bool EGOPlannerManager::planGlobalTrajWaypoints(const Eigen::Vector3d &start_pos, const Eigen::Vector3d &start_vel, const Eigen::Vector3d &start_acc,
+  bool InformedRRTStarPlannerManager::planGlobalTrajWaypoints(const Eigen::Vector3d &start_pos, const Eigen::Vector3d &start_vel, const Eigen::Vector3d &start_acc,
                                                   const std::vector<Eigen::Vector3d> &waypoints, const Eigen::Vector3d &end_vel, const Eigen::Vector3d &end_acc)
   {
 
@@ -562,7 +563,7 @@ namespace ego_planner
     return true;
   }
 
-  bool EGOPlannerManager::planGlobalTraj(const Eigen::Vector3d &start_pos, const Eigen::Vector3d &start_vel, const Eigen::Vector3d &start_acc,
+  bool InformedRRTStarPlannerManager::planGlobalTraj(const Eigen::Vector3d &start_pos, const Eigen::Vector3d &start_vel, const Eigen::Vector3d &start_acc,
                                          const Eigen::Vector3d &end_pos, const Eigen::Vector3d &end_vel, const Eigen::Vector3d &end_acc)
   {
 
@@ -626,7 +627,7 @@ namespace ego_planner
     return true;
   }
 
-  bool EGOPlannerManager::refineTrajAlgo(UniformBspline &traj, vector<Eigen::Vector3d> &start_end_derivative, double ratio, double &ts, Eigen::MatrixXd &optimal_control_points)
+  bool InformedRRTStarPlannerManager::refineTrajAlgo(UniformBspline &traj, vector<Eigen::Vector3d> &start_end_derivative, double ratio, double &ts, Eigen::MatrixXd &optimal_control_points)
   {
     double t_inc;
 
@@ -647,7 +648,7 @@ namespace ego_planner
     return success;
   }
 
-  void EGOPlannerManager::updateTrajInfo(const UniformBspline &position_traj, const ros::Time time_now)
+  void InformedRRTStarPlannerManager::updateTrajInfo(const UniformBspline &position_traj, const ros::Time time_now)
   {
     local_data_.start_time_ = time_now;
     local_data_.position_traj_ = position_traj;
@@ -658,7 +659,7 @@ namespace ego_planner
     local_data_.traj_id_ += 1;
   }
 
-  void EGOPlannerManager::reparamBspline(UniformBspline &bspline, vector<Eigen::Vector3d> &start_end_derivative, double ratio,
+  void InformedRRTStarPlannerManager::reparamBspline(UniformBspline &bspline, vector<Eigen::Vector3d> &start_end_derivative, double ratio,
                                          Eigen::MatrixXd &ctrl_pts, double &dt, double &time_inc)
   {
     double time_origin = bspline.getTimeSum();
@@ -679,4 +680,4 @@ namespace ego_planner
     UniformBspline::parameterizeToBspline(dt, point_set, start_end_derivative, ctrl_pts);
   }
 
-} // namespace ego_planner
+} // namespace informed_rrt_star_planner

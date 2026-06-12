@@ -15,29 +15,25 @@
 #include <vector>
 #include <unordered_map>
 #include <unordered_set>
+#include <cstdint>
+#include <future>
+#include <mutex>
 
-namespace ego_planner
+#include <path_searching/rrt_node.h>
+
+namespace informed_rrt_star_planner
 {
 
-struct RRTNode
-{
-	Eigen::Vector3d x;
-	RRTNode *parent;
-	double cost;
-	int id;
-	std::vector<RRTNode *> children;
-
-	RRTNode(const Eigen::Vector3d &_x, RRTNode *_parent, double _cost, int _id)
-		: x(_x), parent(_parent), cost(_cost), id(_id) {}
-
-	inline void addChild(RRTNode *child) { children.push_back(child); }
-	inline void removeChild(RRTNode *child)
-	{
-		for (auto it = children.begin(); it != children.end(); ++it)
-			if (*it == child) { children.erase(it); break; }
-	}
-};
-
+// Informed RRT* with APF-biased sampling, kd-tree nearest neighbor and a
+// clearance-aware cost. The implementation is split across several .cpp files
+// (grouped by concern) for maintainability:
+//   - informed_rrt_star.cpp     : lifecycle / params / clearTree
+//   - rrt_star_search.cpp       : main search loop + getPath (smoothing)
+//   - rrt_star_nearest.cpp      : kd-tree build/query + brute force + spatial hash
+//   - rrt_star_collision.cpp    : occupancy + clearance queries
+//   - rrt_star_sampling.cpp     : workspace/ellipse/APF sampling
+//   - rrt_star_tree_ops.cpp     : steer/expand/connect/rewire/shortcut
+// Small hot helpers are defined inline in informed_rrt_star_inl.h.
 class InformedRRTstar
 {
 public:
@@ -45,17 +41,13 @@ public:
 
 	InformedRRTstar();
 	~InformedRRTstar();
-
 	void initGridMap(GridMap::Ptr occ_map, const Eigen::Vector3i pool_size);
 	bool InformedRRTstarSearch(const double step_size, Eigen::Vector3d start_pt, Eigen::Vector3d end_pt);
 	std::vector<Eigen::Vector3d> getPath();
 
 private:
 	GridMap::Ptr grid_map_;
-	inline bool checkOccupancy(const Eigen::Vector3d &pos)
-	{
-		return (bool)grid_map_->getInflateOccupancy(pos);
-	}
+	bool checkOccupancy(const Eigen::Vector3d &pos);
 
 	Eigen::Vector3d workspace_min_;
 	Eigen::Vector3d workspace_max_;
@@ -69,8 +61,9 @@ private:
 	int max_iterations_;
 	size_t max_nodes_;
 	double goal_bias_;
+	bool enable_parallel_expansion_;
+	int parallel_batch_size_;
 	double apf_sampling_ratio_;
-	double apf_attr_gain_;
 	double apf_rep_gain_;
 	double apf_rep_radius_;
 	double min_path_clearance_;
@@ -79,11 +72,42 @@ private:
 	Eigen::Vector3d path_prefix_start_;
 	bool has_path_prefix_;
 
+	// Cached straight-line blocking obstacle for start_pt_ -> end_pt_. The blocking obstacle
+	// on the straight line does not change within a single search, so we ray-march for it once
+	// instead of on (potentially) every sampleObstacleOutside() call.
+	bool blocking_obstacle_cached_;
+	bool blocking_obstacle_valid_;
+	Eigen::Vector3d cached_obs_center_;
+	Eigen::Vector3d cached_path_dir_;
+	bool getCachedStraightLineBlocker(Eigen::Vector3d &obs_center, Eigen::Vector3d &path_dir);
+
 	// Tree data
+	std::vector<RRTNode> node_storage_;
 	std::vector<RRTNode *> nodes_;
 	int node_id_counter_;
 	RRTNode *solution_node_;
 	double best_cost_;
+	inline RRTNode *createNode(const Eigen::Vector3d &x, RRTNode *parent, double cost, int id);
+	struct ExpansionCandidate
+	{
+		bool valid{false};
+		Eigen::Vector3d x_new;
+		RRTNode *x_nearest{nullptr};
+		double edge_cost{0.0};
+		double goal_heuristic{0.0};
+	};
+	ExpansionCandidate evaluateExpansionCandidate(const Eigen::Vector3d &x_random, bool use_kdtree);
+	bool buildBestExpansionCandidate(const std::vector<Eigen::Vector3d> &samples, bool use_kdtree, ExpansionCandidate &best);
+	struct OccupancyCacheEntry
+	{
+		bool occupied;
+		uint64_t frame;
+	};
+	std::unordered_map<int64_t, OccupancyCacheEntry> occupancy_cache_;
+	std::mutex occupancy_cache_mtx_;
+	uint64_t occupancy_cache_frame_;
+	static constexpr int OCCUPANCY_CACHE_SIZE = 18000;
+	inline int64_t occupancyCacheKey(const Eigen::Vector3d &pos) const;
 
 	// Informed ellipse
 	double c_best_;
@@ -101,6 +125,15 @@ private:
 	void kdTreeNNRecursive(int left, int right, int depth, const Eigen::Vector3d &query,
 						   int &best_node_id, double &best_dist) const;
 	inline RRTNode *kdTreeNearestNeighbor(const Eigen::Vector3d &x);
+
+	// ===== Optimization 2.5: spatial hash for fast rewire neighborhood =====
+	std::unordered_map<int64_t, std::vector<int>> node_spatial_index_;
+	double node_spatial_cell_size_;
+	inline int64_t nodeSpatialKeyFromCoord(int ix, int iy, int iz) const;
+	inline void nodeSpatialCoord(const Eigen::Vector3d &pos, int &ix, int &iy, int &iz) const;
+	inline void resetNodeSpatialIndex(double cell_size);
+	inline void insertNodeToSpatialIndex(int node_idx);
+	void queryNearbyNodes(const Eigen::Vector3d &center, double radius, std::vector<RRTNode *> &out_nodes) const;
 
 	// ===== Optimization 3: path cache + reuse buffers =====
 	bool path_cache_valid_;
@@ -125,6 +158,19 @@ private:
 	static constexpr int APF_CACHE_SIZE = 256;
 	bool apfCacheLookup(const Eigen::Vector3d &pos, double &out_clear, Eigen::Vector3d &out_grad);
 	void apfCacheStore(const Eigen::Vector3d &pos, double clear, const Eigen::Vector3d &grad);
+
+	// ===== Optimization 6: per-search voxel clearance cache =====
+	struct ClearanceCacheEntry
+	{
+		double clearance;
+		uint64_t frame;
+	};
+	std::unordered_map<int64_t, ClearanceCacheEntry> clearance_cache_;
+	uint64_t clearance_cache_frame_;
+	static constexpr int CLEARANCE_CACHE_SIZE = 12000;
+	inline int64_t clearanceCacheKey(const Eigen::Vector3d &pos) const;
+	inline bool clearanceCacheLookup(const Eigen::Vector3d &pos, double &clearance_out);
+	inline void clearanceCacheStore(const Eigen::Vector3d &pos, double clearance);
 
 	// ===== Fast PRNG =====
 	std::vector<double> rand_buf_;
@@ -151,6 +197,8 @@ private:
 								  Eigen::Vector3d &outside_pt);
 	bool sampleObstacleOutside(Eigen::Vector3d &x_sample);
 	double queryClearance(const Eigen::Vector3d &pos);  // 查询某点安全裕量
+	bool hasClearanceAtLeast(const Eigen::Vector3d &pos, double min_clearance);
+	bool isSegmentClearanceAtLeast(const Eigen::Vector3d &p1, const Eigen::Vector3d &p2, double min_clearance);
 	double queryPathClearance(const Eigen::Vector3d &p1, const Eigen::Vector3d &p2);  // 查询路径安全裕量
 	double evaluatePathClearance(RRTNode *node);  // 评估路径安全性
 	double evaluateForwardClearance(RRTNode *node, const Eigen::Vector3d &final_pt);
@@ -165,12 +213,14 @@ private:
 	void rewire(RRTNode *new_node);
 	std::vector<RRTNode *> traceBack(RRTNode *node);
 	void clearTree();
-	double attractivePotential(const Eigen::Vector3d &pos, Eigen::Vector3d &grad);
 	double repulsivePotential(const Eigen::Vector3d &pos, Eigen::Vector3d &grad);
 	Eigen::Vector3d sampleWithAPF();
 	void tryShortcutPath();
 };
 
-} // namespace ego_planner
+} // namespace informed_rrt_star_planner
 
-#endif
+// Inline definitions of small hot helpers (must follow the class declaration).
+#include <path_searching/informed_rrt_star_inl.h>
+
+#endif // _INFORMED_RRT_STAR_H_

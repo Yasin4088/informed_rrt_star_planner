@@ -3,7 +3,7 @@
 #include <algorithm>
 // using namespace std;
 
-namespace ego_planner
+namespace informed_rrt_star_planner
 {
   namespace
   {
@@ -493,7 +493,7 @@ namespace ego_planner
     // cout << "A5" << endl;
 
     return control_pts_buf;
-  } // namespace ego_planner
+  } // namespace informed_rrt_star_planner
 
   /* This function is very similar to check_collision_and_rebound(). 
    * It was written separately, just because I did it once and it has been running stably since March 2020.
@@ -1944,4 +1944,4 @@ bool BsplineOptimizer::validateFinalTrajectory(const Eigen::MatrixXd &ctrl_pts, 
   return true;
 }
 
-} // namespace ego_planner
+} // namespace informed_rrt_star_planner

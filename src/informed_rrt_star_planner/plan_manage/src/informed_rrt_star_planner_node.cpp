@@ -1,17 +1,17 @@
 #include <ros/ros.h>
 #include <visualization_msgs/Marker.h>
 
-#include <plan_manage/ego_replan_fsm.h>
+#include <plan_manage/informed_rrt_star_replan_fsm.h>
 
-using namespace ego_planner;
+using namespace informed_rrt_star_planner;
 
 int main(int argc, char **argv)
 {
 
-  ros::init(argc, argv, "ego_planner_node");
+  ros::init(argc, argv, "informed_rrt_star_planner_node");
   ros::NodeHandle nh("~");
 
-  EGOReplanFSM rebo_replan;
+  InformedRRTStarReplanFSM rebo_replan;
 
   rebo_replan.init(nh);
 
@@ -25,9 +25,9 @@ int main(int argc, char **argv)
 // #include <csignal>
 // #include <visualization_msgs/Marker.h>
 
-// #include <plan_manage/ego_replan_fsm.h>
+// #include <plan_manage/informed_rrt_star_replan_fsm.h>
 
-// using namespace ego_planner;
+// using namespace informed_rrt_star_planner;
 
 // void SignalHandler(int signal) {
 //   if(ros::isInitialized() && ros::isStarted() && ros::ok() && !ros::isShuttingDown()){
@@ -40,10 +40,10 @@ int main(int argc, char **argv)
 //   signal(SIGINT, SignalHandler);
 //   signal(SIGTERM,SignalHandler);
 
-//   ros::init(argc, argv, "ego_planner_node", ros::init_options::NoSigintHandler);
+//   ros::init(argc, argv, "informed_rrt_star_planner_node", ros::init_options::NoSigintHandler);
 //   ros::NodeHandle nh("~");
 
-//   EGOReplanFSM rebo_replan;
+//   InformedRRTStarReplanFSM rebo_replan;
 
 //   rebo_replan.init(nh);
 

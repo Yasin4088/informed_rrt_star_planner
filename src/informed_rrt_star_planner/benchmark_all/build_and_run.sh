@@ -40,11 +40,11 @@ PLOT_CSV="$BENCHMARK_DIR/pipeline_benchmark_results.csv"
 rm -f "$PLOT_CSV"
 
 if [ -f "$PLOT_CSV" ]; then
-    python3 plot_results.py "$PLOT_CSV" loads
+    python3 src/plot_results.py "$PLOT_CSV" plots
 else
     echo "WARNING: $PLOT_CSV not found in current dir, checking build dir..."
     if [ -f "$BUILD_DIR/pipeline_benchmark_results.csv" ]; then
-        python3 plot_results.py "$BUILD_DIR/pipeline_benchmark_results.csv" loads
+        python3 src/plot_results.py "$BUILD_DIR/pipeline_benchmark_results.csv" plots
     else
         echo "ERROR: CSV not found."
     fi
@@ -54,5 +54,5 @@ echo ""
 echo "╔══════════════════════════════════════════════════════════════════════╗"
 echo "║  Done.                                                             ║"
 echo "║  CSV:   $BENCHMARK_DIR/pipeline_benchmark_results.csv"
-echo "║  Plots: $BENCHMARK_DIR/loads/"
+echo "║  Plots: $BENCHMARK_DIR/plots/"
 echo "╚══════════════════════════════════════════════════════════════════════╝"

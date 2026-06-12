@@ -7,7 +7,7 @@
 
 using namespace std;
 
-namespace ego_planner
+namespace informed_rrt_star_planner
 {
   // An implementation of non-uniform B-spline with different dimensions
   // It also represents uniform B-spline which is a special case of non-uniform
@@ -76,5 +76,5 @@ namespace ego_planner
 
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
   };
-} // namespace ego_planner
+} // namespace informed_rrt_star_planner
 #endif

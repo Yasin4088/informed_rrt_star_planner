@@ -1,86 +1,199 @@
 <launch>
-  <!-- size of map, change the size inflate x, y, z according to your application -->
+  <!-- basic -->
   <arg name="map_size_x"/>
   <arg name="map_size_y"/>
   <arg name="map_size_z"/>
   <arg name="target_x"/>
   <arg name="target_y"/>
   <arg name="target_z"/>
-
   <arg name="drone_id"/>
-
-  <!-- topic of your odometry such as VIO or LIO -->
   <arg name="odom_topic"/>
+  <arg name="obj_num" value="1"/>
 
-  <!-- number of moving objects -->
-  <arg name="obj_num" value="1" />
+  <!-- sensor / mapping -->
+  <arg name="camera_pose_topic" value="/mavros/vision_pose/pose"/>
+  <arg name="depth_topic" value="realsense/depth_camera/depth/image_raw"/>
+  <arg name="cloud_topic" value="disabled_pcl_render_node/points"/>
+  <arg name="cx" value="320.5"/>
+  <arg name="cy" value="240.5"/>
+  <arg name="fx" value="554.254691191187"/>
+  <arg name="fy" value="554.254691191187"/>
 
-  <!-- main algorithm params -->
-  <include file="$(find informed_rrt_star_planner)/launch/advanced_param_xtdrone.xml">
+  <!-- planner args -->
+  <arg name="max_vel" value="0.5"/>
+  <arg name="max_acc" value="1.15"/>
+  <arg name="planning_horizon" value="7.2"/>
+  <arg name="flight_type" value="1"/>
+  <arg name="use_distinctive_trajs" value="false"/>
+  <arg name="thresh_replan_time" value="0.30"/>
 
-    <arg name="thresh_replan_time" value="0.25"/>
+  <!-- waypoint args -->
+  <arg name="point_num" value="2"/>
+  <arg name="point0_x" value="$(arg target_x)"/>
+  <arg name="point0_y" value="$(arg target_y)"/>
+  <arg name="point0_z" value="$(arg target_z)"/>
+  <arg name="point1_x" value="6.0"/>
+  <arg name="point1_y" value="0.0"/>
+  <arg name="point1_z" value="1.5"/>
+  <arg name="point2_x" value="8.0"/>
+  <arg name="point2_y" value="-8.0"/>
+  <arg name="point2_z" value="1.5"/>
+  <arg name="point3_x" value="0.0"/>
+  <arg name="point3_y" value="-15.0"/>
+  <arg name="point3_z" value="1.0"/>
+  <arg name="point4_x" value="-15.0"/>
+  <arg name="point4_y" value="0.0"/>
+  <arg name="point4_z" value="1.0"/>
 
-    <arg name="drone_id" value="$(arg drone_id)"/>
+  <!-- Informed RRT* tunables (runtime, no recompile required) -->
+  <arg name="rrt_max_time" value="0.35"/>
+  <arg name="rrt_opt_max_time" value="0.10"/>
+  <arg name="rrt_max_iterations" value="10000"/>
+  <arg name="rrt_max_nodes" value="6000"/>
+  <arg name="rrt_goal_bias" value="0.20"/>
+  <!-- 并行展开需要每批样本数>=3 才会触发(见 buildBestExpansionCandidate)，batch=2 时永远走串行；
+       且其实现是在热循环里 std::async 现场建线程，开销大于收益，故显式关闭。batch=2 仍提供串行 best-of-2。 -->
+  <arg name="rrt_enable_parallel" value="false"/>
+  <arg name="rrt_parallel_batch_size" value="2"/>
+  <arg name="rrt_apf_sampling_ratio" value="0.35"/>
+  <arg name="rrt_apf_rep_gain" value="2.0"/>
+  <arg name="rrt_apf_rep_radius" value="1.5"/>
+  <arg name="rrt_min_path_clearance" value="0.25"/>
 
-    <arg name="map_size_x_" value="$(arg map_size_x)"/>
-    <arg name="map_size_y_" value="$(arg map_size_y)"/>
-    <arg name="map_size_z_" value="$(arg map_size_z)"/>
-    <arg name="odometry_topic" value="$(arg odom_topic)"/>
+  <node pkg="informed_rrt_star_planner" name="iris_$(arg drone_id)_informed_rrt_star_planner_node" type="informed_rrt_star_planner_node" output="screen">
+    <remap from="~odom_world" to="$(arg odom_topic)"/>
+    <remap from="~planning/bspline" to="/xtdrone/iris_$(arg drone_id)/planning/bspline"/>
+    <remap from="~planning/data_display" to="/xtdrone/iris_$(arg drone_id)/planning/data_display"/>
+    <remap from="~planning/broadcast_bspline_from_planner" to="/broadcast_bspline"/>
+    <remap from="~planning/broadcast_bspline_to_planner" to="/broadcast_bspline"/>
 
-    <arg name="obj_num_set" value="$(arg obj_num)" />
+    <remap from="~grid_map/odom" to="$(arg odom_topic)"/>
+    <remap from="~grid_map/cloud" to="/iris_$(arg drone_id)/$(arg cloud_topic)"/>
+    <remap from="~grid_map/pose" to="/iris_$(arg drone_id)/$(arg camera_pose_topic)"/>
+    <remap from="~grid_map/depth" to="/iris_$(arg drone_id)/$(arg depth_topic)"/>
 
-    <!-- camera pose: transform of camera frame in the world frame -->
-    <!-- depth topic: depth image, 640x480 by default -->
-    <!-- don't set cloud_topic if you already set these ones! -->
-    <arg name="camera_pose_topic" value="/mavros/vision_pose/pose"/>
-    <arg name="depth_topic" value="realsense/depth_camera/depth/image_raw"/>
+    <!-- planning fsm -->
+    <param name="fsm/flight_type" value="$(arg flight_type)" type="int"/>
+    <param name="fsm/thresh_replan_time" value="$(arg thresh_replan_time)" type="double"/>
+    <param name="fsm/exec_timer_dt" value="0.015" type="double"/>
+    <param name="fsm/safety_timer_dt" value="0.060" type="double"/>
+    <param name="fsm/thresh_no_replan_meter" value="0.65" type="double"/>
+    <param name="fsm/planning_horizon" value="$(arg planning_horizon)" type="double"/>
+    <!-- planning_horizen_time 现在是控制局部前瞻距离的实际旋钮：前瞻≈planning_horizen_time×max_vel+刹车距离。
+         注意代码用的是配置 max_vel(常量)而非瞬时速度，所以这是个常量前瞻。当前 10.2×0.5+0.11≈5.2m。
+         想要更长前瞻就调大它(上限受 manager/planning_horizon=7.2 约束)，更短就调小。 -->
+    <param name="fsm/planning_horizen_time" value="10.2" type="double"/>
+    <!-- 仅作为接近静止时的前瞻安全下限，不再恒定覆盖时间型前瞻。 -->
+    <param name="fsm/local_horizon_min" value="2.5" type="double"/>
+    <param name="fsm/emergency_time" value="1.5" type="double"/>
+    <param name="fsm/goal_clearance" value="0.35" type="double"/>
+    <param name="fsm/goal_search_radius" value="2.0" type="double"/>
+    <param name="fsm/goal_surround_check_radius" value="1.0" type="double"/>
+    <param name="fsm/goal_surround_hit_ratio" value="0.65" type="double"/>
+    <param name="fsm/escape_trigger_clearance" value="0.65" type="double"/>
+    <param name="fsm/escape_target_clearance" value="0.75" type="double"/>
+    <param name="fsm/escape_search_radius" value="4.0" type="double"/>
+    <param name="fsm/escape_reached_thresh" value="0.45" type="double"/>
+    <param name="fsm/escape_max_attempts" value="3" type="int"/>
+    <param name="fsm/escape_trigger_fail_times" value="6" type="int"/>
+    <param name="fsm/realworld_experiment" value="false"/>
+    <param name="fsm/fail_safe" value="true"/>
 
-    <!-- Disable dense rendered point cloud while tuning; depth image builds the local map. -->
-    <arg name="cloud_topic" value="disabled_pcl_render_node/points"/>
+    <param name="fsm/waypoint_num" value="$(arg point_num)" type="int"/>
+    <param name="fsm/waypoint0_x" value="$(arg point0_x)" type="double"/>
+    <param name="fsm/waypoint0_y" value="$(arg point0_y)" type="double"/>
+    <param name="fsm/waypoint0_z" value="$(arg point0_z)" type="double"/>
+    <param name="fsm/waypoint1_x" value="$(arg point1_x)" type="double"/>
+    <param name="fsm/waypoint1_y" value="$(arg point1_y)" type="double"/>
+    <param name="fsm/waypoint1_z" value="$(arg point1_z)" type="double"/>
+    <param name="fsm/waypoint2_x" value="$(arg point2_x)" type="double"/>
+    <param name="fsm/waypoint2_y" value="$(arg point2_y)" type="double"/>
+    <param name="fsm/waypoint2_z" value="$(arg point2_z)" type="double"/>
+    <param name="fsm/waypoint3_x" value="$(arg point3_x)" type="double"/>
+    <param name="fsm/waypoint3_y" value="$(arg point3_y)" type="double"/>
+    <param name="fsm/waypoint3_z" value="$(arg point3_z)" type="double"/>
+    <param name="fsm/waypoint4_x" value="$(arg point4_x)" type="double"/>
+    <param name="fsm/waypoint4_y" value="$(arg point4_y)" type="double"/>
+    <param name="fsm/waypoint4_z" value="$(arg point4_z)" type="double"/>
 
-    <!-- intrinsic params of the depth camera -->
-    <arg name="cx" value="320.5"/>
-    <arg name="cy" value="240.5"/>
-    <arg name="fx" value="554.254691191187"/>
-    <arg name="fy" value="554.254691191187"/>
+    <!-- grid map -->
+    <param name="grid_map/resolution" value="0.2"/>
+    <param name="grid_map/map_size_x" value="$(arg map_size_x)"/>
+    <param name="grid_map/map_size_y" value="$(arg map_size_y)"/>
+    <param name="grid_map/map_size_z" value="$(arg map_size_z)"/>
+    <param name="grid_map/local_update_range_x" value="7"/>
+    <param name="grid_map/local_update_range_y" value="7"/>
+    <param name="grid_map/local_update_range_z" value="3"/>
+    <param name="grid_map/obstacles_inflation" value="0.16"/>
+    <param name="grid_map/local_map_margin" value="10"/>
+    <param name="grid_map/ground_height" value="-1"/>
+    <param name="grid_map/cx" value="$(arg cx)"/>
+    <param name="grid_map/cy" value="$(arg cy)"/>
+    <param name="grid_map/fx" value="$(arg fx)"/>
+    <param name="grid_map/fy" value="$(arg fy)"/>
+    <param name="grid_map/use_depth_filter" value="true"/>
+    <param name="grid_map/depth_filter_tolerance" value="0.15"/>
+    <param name="grid_map/depth_filter_maxdist" value="7.5"/>
+    <param name="grid_map/depth_filter_mindist" value="0.3"/>
+    <param name="grid_map/depth_filter_margin" value="2"/>
+    <param name="grid_map/k_depth_scaling_factor" value="1000.0"/>
+    <param name="grid_map/skip_pixel" value="4"/>
+    <param name="grid_map/p_hit" value="0.65"/>
+    <param name="grid_map/p_miss" value="0.35"/>
+    <param name="grid_map/p_min" value="0.12"/>
+    <param name="grid_map/p_max" value="0.90"/>
+    <param name="grid_map/p_occ" value="0.80"/>
+    <param name="grid_map/min_ray_length" value="0.1"/>
+    <param name="grid_map/max_ray_length" value="8.0"/>
+    <param name="grid_map/virtual_ceil_height" value="3"/>
+    <param name="grid_map/visualization_truncate_height" value="2"/>
+    <param name="grid_map/show_occ_time" value="false"/>
+    <param name="grid_map/odom_depth_timeout" value="2.5"/>
+    <param name="grid_map/pose_type" value="2"/>
+    <param name="grid_map/frame_id" value="map"/>
 
-    <arg name="max_vel" value="0.5" />
-    <arg name="max_acc" value="1.15" />
+    <!-- planner manager -->
+    <param name="manager/max_vel" value="$(arg max_vel)" type="double"/>
+    <param name="manager/max_acc" value="$(arg max_acc)" type="double"/>
+    <param name="manager/max_jerk" value="2.8" type="double"/>
+    <param name="manager/control_points_distance" value="0.20" type="double"/>
+    <param name="manager/feasibility_tolerance" value="0.035" type="double"/>
+    <param name="manager/planning_horizon" value="$(arg planning_horizon)" type="double"/>
+    <param name="manager/use_distinctive_trajs" value="$(arg use_distinctive_trajs)" type="bool"/>
+    <param name="manager/drone_id" value="$(arg drone_id)"/>
 
-    <arg name="planning_horizon" value="6.0" /> 
+    <!-- trajectory optimization -->
+    <param name="optimization/lambda_smooth" value="1.7" type="double"/>
+    <param name="optimization/lambda_collision" value="3.2" type="double"/>
+    <param name="optimization/lambda_feasibility" value="0.15" type="double"/>
+    <param name="optimization/lambda_fitness" value="1.05" type="double"/>
+    <param name="optimization/dist0" value="0.55" type="double"/>
+    <param name="optimization/swarm_clearance" value="0.60" type="double"/>
+    <param name="optimization/max_vel" value="$(arg max_vel)" type="double"/>
+    <param name="optimization/max_acc" value="$(arg max_acc)" type="double"/>
 
-    <!-- 单机飞行关闭多备选轨迹可减少相邻周期轨迹形状随机切换引起的飘移感。 -->
-    <arg name="use_distinctive_trajs" value="false" />
+    <param name="bspline/limit_vel" value="$(arg max_vel)" type="double"/>
+    <param name="bspline/limit_acc" value="$(arg max_acc)" type="double"/>
+    <param name="bspline/limit_ratio" value="1.04" type="double"/>
 
-    <!-- 1: use 2D Nav Goal to select goal  -->
-    <!-- 2: use global waypoints below  -->
-    <arg name="flight_type" value="1" />
-    
-    <!-- global waypoints -->
-    <!-- It generates a piecewise min-snap traj passing all waypoints -->
-    <arg name="point_num" value="2" />
+    <!-- objects prediction -->
+    <param name="prediction/obj_num" value="$(arg obj_num)" type="int"/>
+    <param name="prediction/lambda" value="1.0" type="double"/>
+    <param name="prediction/predict_rate" value="1.0" type="double"/>
 
-    <arg name="point0_x" value="$(arg target_x)" />
-    <arg name="point0_y" value="$(arg target_y)" />
-    <arg name="point0_z" value="$(arg target_z)" />
-
-    <arg name="point1_x" value="6.0" />
-    <arg name="point1_y" value="0.0" />
-    <arg name="point1_z" value="1.5" />
-
-    <arg name="point2_x" value="8.0" />
-    <arg name="point2_y" value="-8.0" />
-    <arg name="point2_z" value="1.5" />
-
-    <arg name="point3_x" value="0.0" />
-    <arg name="point3_y" value="-15.0" />
-    <arg name="point3_z" value="1.0" />
-
-    <arg name="point4_x" value="-15.0" />
-    <arg name="point4_y" value="0.0" />
-    <arg name="point4_z" value="1.0" />
-    
-  </include>
+    <!-- informed rrt star -->
+    <param name="informed_rrt_star/rrt_max_time" value="$(arg rrt_max_time)" type="double"/>
+    <param name="informed_rrt_star/opt_max_time" value="$(arg rrt_opt_max_time)" type="double"/>
+    <param name="informed_rrt_star/max_iterations" value="$(arg rrt_max_iterations)" type="int"/>
+    <param name="informed_rrt_star/max_nodes" value="$(arg rrt_max_nodes)" type="int"/>
+    <param name="informed_rrt_star/goal_bias" value="$(arg rrt_goal_bias)" type="double"/>
+    <param name="informed_rrt_star/enable_parallel_expansion" value="$(arg rrt_enable_parallel)" type="bool"/>
+    <param name="informed_rrt_star/parallel_batch_size" value="$(arg rrt_parallel_batch_size)" type="int"/>
+    <param name="informed_rrt_star/apf_sampling_ratio" value="$(arg rrt_apf_sampling_ratio)" type="double"/>
+    <param name="informed_rrt_star/apf_rep_gain" value="$(arg rrt_apf_rep_gain)" type="double"/>
+    <param name="informed_rrt_star/apf_rep_radius" value="$(arg rrt_apf_rep_radius)" type="double"/>
+    <param name="informed_rrt_star/min_path_clearance" value="$(arg rrt_min_path_clearance)" type="double"/>
+  </node>
 
   <!-- trajectory server -->
   <node pkg="informed_rrt_star_planner" name="iris_$(arg drone_id)_traj_server" type="traj_server" output="screen">

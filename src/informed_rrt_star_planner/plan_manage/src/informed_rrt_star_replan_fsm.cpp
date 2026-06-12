@@ -1,10 +1,10 @@
 
-#include <plan_manage/ego_replan_fsm.h>
+#include <plan_manage/informed_rrt_star_replan_fsm.h>
 
-namespace ego_planner
+namespace informed_rrt_star_planner
 {
 
-  void EGOReplanFSM::init(ros::NodeHandle &nh)
+  void InformedRRTStarReplanFSM::init(ros::NodeHandle &nh)
   {
     current_wp_ = 0;
     exec_state_ = FSM_EXEC_STATE::INIT;
@@ -39,38 +39,45 @@ namespace ego_planner
 
     /* initialize main modules */
     visualization_.reset(new PlanningVisualization(nh));
-    planner_manager_.reset(new EGOPlannerManager);
+    planner_manager_.reset(new InformedRRTStarPlannerManager);
     planner_manager_->initPlanModules(nh, visualization_);
     planner_manager_->deliverTrajToOptimizer(); // store trajectories
     planner_manager_->setDroneIdtoOpt();
 
     /* callback */
-    exec_timer_ = nh.createTimer(ros::Duration(0.01), &EGOReplanFSM::execFSMCallback, this);
-    safety_timer_ = nh.createTimer(ros::Duration(0.05), &EGOReplanFSM::checkCollisionCallback, this);
+    double exec_timer_dt = 0.01;
+    double safety_timer_dt = 0.05;
+    nh.param("fsm/exec_timer_dt", exec_timer_dt, 0.01);
+    nh.param("fsm/safety_timer_dt", safety_timer_dt, 0.05);
+    exec_timer_dt = std::max(0.005, exec_timer_dt);
+    safety_timer_dt = std::max(exec_timer_dt, safety_timer_dt);
+    exec_timer_ = nh.createTimer(ros::Duration(exec_timer_dt), &InformedRRTStarReplanFSM::execFSMCallback, this);
+    safety_timer_ = nh.createTimer(ros::Duration(safety_timer_dt), &InformedRRTStarReplanFSM::checkCollisionCallback, this);
+    ROS_INFO("[FSM] timer periods: exec=%.3fs safety=%.3fs", exec_timer_dt, safety_timer_dt);
 
-    odom_sub_ = nh.subscribe("odom_world", 1, &EGOReplanFSM::odometryCallback, this);
+    odom_sub_ = nh.subscribe("odom_world", 1, &InformedRRTStarReplanFSM::odometryCallback, this);
 
     if (planner_manager_->pp_.drone_id >= 1)
     {
       string sub_topic_name = string("/drone_") + std::to_string(planner_manager_->pp_.drone_id - 1) + string("_planning/swarm_trajs");
-      swarm_trajs_sub_ = nh.subscribe(sub_topic_name.c_str(), 10, &EGOReplanFSM::swarmTrajsCallback, this, ros::TransportHints().tcpNoDelay());
+      swarm_trajs_sub_ = nh.subscribe(sub_topic_name.c_str(), 10, &InformedRRTStarReplanFSM::swarmTrajsCallback, this, ros::TransportHints().tcpNoDelay());
     }
     string pub_topic_name = string("/drone_") + std::to_string(planner_manager_->pp_.drone_id) + string("_planning/swarm_trajs");
     swarm_trajs_pub_ = nh.advertise<traj_utils::MultiBsplines>(pub_topic_name.c_str(), 10);
 
     broadcast_bspline_pub_ = nh.advertise<traj_utils::Bspline>("planning/broadcast_bspline_from_planner", 10);
-    broadcast_bspline_sub_ = nh.subscribe("planning/broadcast_bspline_to_planner", 100, &EGOReplanFSM::BroadcastBsplineCallback, this, ros::TransportHints().tcpNoDelay());
+    broadcast_bspline_sub_ = nh.subscribe("planning/broadcast_bspline_to_planner", 100, &InformedRRTStarReplanFSM::BroadcastBsplineCallback, this, ros::TransportHints().tcpNoDelay());
 
     bspline_pub_ = nh.advertise<traj_utils::Bspline>("planning/bspline", 10);
     data_disp_pub_ = nh.advertise<traj_utils::DataDisp>("planning/data_display", 100);
 
     if (target_type_ == TARGET_TYPE::MANUAL_TARGET)
     {
-      waypoint_sub_ = nh.subscribe("/move_base_simple/goal", 1, &EGOReplanFSM::waypointCallback, this);
+      waypoint_sub_ = nh.subscribe("/move_base_simple/goal", 1, &InformedRRTStarReplanFSM::waypointCallback, this);
     }
     else if (target_type_ == TARGET_TYPE::PRESET_TARGET)
     {
-      trigger_sub_ = nh.subscribe("/traj_start_trigger", 1, &EGOReplanFSM::triggerCallback, this);
+      trigger_sub_ = nh.subscribe("/traj_start_trigger", 1, &InformedRRTStarReplanFSM::triggerCallback, this);
 
       ROS_INFO("Wait for 1 second.");
       int count = 0;
@@ -94,7 +101,7 @@ namespace ego_planner
       cout << "Wrong target_type_ value! target_type_=" << target_type_ << endl;
   }
 
-  void EGOReplanFSM::readGivenWps()
+  void InformedRRTStarReplanFSM::readGivenWps()
   {
     if (waypoint_num_ <= 0)
     {
@@ -160,7 +167,7 @@ namespace ego_planner
     // }
   }
 
-  bool EGOReplanFSM::sanitizeGoalWaypoint(const Eigen::Vector3d &raw_wp, Eigen::Vector3d &safe_wp)
+  bool InformedRRTStarReplanFSM::sanitizeGoalWaypoint(const Eigen::Vector3d &raw_wp, Eigen::Vector3d &safe_wp)
   {
     auto map = planner_manager_->grid_map_;
     constexpr double kPi = 3.14159265358979323846;
@@ -258,7 +265,7 @@ namespace ego_planner
     return false;
   }
 
-  void EGOReplanFSM::planNextWaypoint(const Eigen::Vector3d next_wp)
+  void InformedRRTStarReplanFSM::planNextWaypoint(const Eigen::Vector3d next_wp)
   {
     Eigen::Vector3d safe_wp;
     if (!sanitizeGoalWaypoint(next_wp, safe_wp))
@@ -308,14 +315,14 @@ namespace ego_planner
     }
   }
 
-  void EGOReplanFSM::triggerCallback(const geometry_msgs::PoseStampedPtr &msg)
+  void InformedRRTStarReplanFSM::triggerCallback(const geometry_msgs::PoseStampedPtr &msg)
   {
     have_trigger_ = true;
     cout << "Triggered!" << endl;
     init_pt_ = odom_pos_;
   }
 
-  void EGOReplanFSM::waypointCallback(const geometry_msgs::PoseStampedPtr &msg)
+  void InformedRRTStarReplanFSM::waypointCallback(const geometry_msgs::PoseStampedPtr &msg)
   {
     if (msg->pose.position.z < -0.1)
       return;
@@ -329,7 +336,7 @@ namespace ego_planner
     planNextWaypoint(end_wp);
   }
 
-  void EGOReplanFSM::odometryCallback(const nav_msgs::OdometryConstPtr &msg)
+  void InformedRRTStarReplanFSM::odometryCallback(const nav_msgs::OdometryConstPtr &msg)
   {
     odom_pos_(0) = msg->pose.pose.position.x;
     odom_pos_(1) = msg->pose.pose.position.y;
@@ -349,7 +356,7 @@ namespace ego_planner
     have_odom_ = true;
   }
 
-  void EGOReplanFSM::BroadcastBsplineCallback(const traj_utils::BsplinePtr &msg)
+  void InformedRRTStarReplanFSM::BroadcastBsplineCallback(const traj_utils::BsplinePtr &msg)
   {
     size_t id = msg->drone_id;
     if ((int)id == planner_manager_->pp_.drone_id)
@@ -427,7 +434,7 @@ namespace ego_planner
     }
   }
 
-  void EGOReplanFSM::swarmTrajsCallback(const traj_utils::MultiBsplinesPtr &msg)
+  void InformedRRTStarReplanFSM::swarmTrajsCallback(const traj_utils::MultiBsplinesPtr &msg)
   {
 
     multi_bspline_msgs_buf_.traj.clear();
@@ -509,7 +516,7 @@ namespace ego_planner
     have_recv_pre_agent_ = true;
   }
 
-  void EGOReplanFSM::changeFSMExecState(FSM_EXEC_STATE new_state, string pos_call)
+  void InformedRRTStarReplanFSM::changeFSMExecState(FSM_EXEC_STATE new_state, string pos_call)
   {
 
     if (new_state == exec_state_)
@@ -523,19 +530,19 @@ namespace ego_planner
     cout << "[" + pos_call + "]: from " + state_str[pre_s] + " to " + state_str[int(new_state)] << endl;
   }
 
-  std::pair<int, EGOReplanFSM::FSM_EXEC_STATE> EGOReplanFSM::timesOfConsecutiveStateCalls()
+  std::pair<int, InformedRRTStarReplanFSM::FSM_EXEC_STATE> InformedRRTStarReplanFSM::timesOfConsecutiveStateCalls()
   {
     return std::pair<int, FSM_EXEC_STATE>(continously_called_times_, exec_state_);
   }
 
-  void EGOReplanFSM::printFSMExecState()
+  void InformedRRTStarReplanFSM::printFSMExecState()
   {
     static string state_str[8] = {"INIT", "WAIT_TARGET", "GEN_NEW_TRAJ", "REPLAN_TRAJ", "EXEC_TRAJ", "EMERGENCY_STOP", "SEQUENTIAL_START"};
 
     cout << "[FSM]: state: " + state_str[int(exec_state_)] << endl;
   }
 
-  void EGOReplanFSM::execFSMCallback(const ros::TimerEvent &e)
+  void InformedRRTStarReplanFSM::execFSMCallback(const ros::TimerEvent &e)
   {
     exec_timer_.stop(); // To avoid blockage
 
@@ -722,7 +729,7 @@ namespace ego_planner
     exec_timer_.start();
   }
 
-  bool EGOReplanFSM::planFromGlobalTraj(const int trial_times /*=1*/) //zx-todo
+  bool InformedRRTStarReplanFSM::planFromGlobalTraj(const int trial_times /*=1*/) //zx-todo
   {
     start_pt_ = odom_pos_;
     start_vel_ = odom_vel_;
@@ -744,7 +751,7 @@ namespace ego_planner
     return false;
   }
 
-  bool EGOReplanFSM::planFromCurrentTraj(const int trial_times /*=1*/)
+  bool InformedRRTStarReplanFSM::planFromCurrentTraj(const int trial_times /*=1*/)
   {
 
     LocalTrajData *info = &planner_manager_->local_data_;
@@ -781,7 +788,7 @@ namespace ego_planner
     return true;
   }
 
-  void EGOReplanFSM::checkCollisionCallback(const ros::TimerEvent &e)
+  void InformedRRTStarReplanFSM::checkCollisionCallback(const ros::TimerEvent &e)
   {
 
     LocalTrajData *info = &planner_manager_->local_data_;
@@ -921,7 +928,7 @@ namespace ego_planner
     }
   }
 
-  bool EGOReplanFSM::callReboundReplan(bool flag_use_poly_init, bool flag_randomPolyTraj)
+  bool InformedRRTStarReplanFSM::callReboundReplan(bool flag_use_poly_init, bool flag_randomPolyTraj)
   {
 
     getLocalTarget();
@@ -973,7 +980,7 @@ namespace ego_planner
     return plan_and_refine_success;
   }
 
-  void EGOReplanFSM::publishSwarmTrajs(bool startup_pub)
+  void InformedRRTStarReplanFSM::publishSwarmTrajs(bool startup_pub)
   {
     auto info = &planner_manager_->local_data_;
 
@@ -1024,7 +1031,7 @@ namespace ego_planner
     broadcast_bspline_pub_.publish(bspline);
   }
 
-  bool EGOReplanFSM::callEmergencyStop(Eigen::Vector3d stop_pos)
+  bool InformedRRTStarReplanFSM::callEmergencyStop(Eigen::Vector3d stop_pos)
   {
 
     planner_manager_->EmergencyStop(stop_pos);
@@ -1060,7 +1067,7 @@ namespace ego_planner
     return true;
   }
 
-  void EGOReplanFSM::getLocalTarget()
+  void InformedRRTStarReplanFSM::getLocalTarget()
   {
     double t;
 
@@ -1124,4 +1131,4 @@ namespace ego_planner
     }
   }
 
-} // namespace ego_planner
+} // namespace informed_rrt_star_planner

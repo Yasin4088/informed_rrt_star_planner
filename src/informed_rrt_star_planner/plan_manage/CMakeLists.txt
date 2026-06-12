@@ -25,7 +25,7 @@ find_package(catkin REQUIRED COMPONENTS
 # catkin_package(CATKIN_DEPENDS message_runtime)
 catkin_package(
  INCLUDE_DIRS include
- LIBRARIES ego_planner
+ LIBRARIES informed_rrt_star_planner
  CATKIN_DEPENDS plan_env path_searching bspline_opt traj_utils 
 #  DEPENDS system_lib
 )
@@ -39,15 +39,15 @@ include_directories(
 )
 
 
-add_executable(ego_planner_node
-  src/ego_planner_node.cpp 
-  src/ego_replan_fsm.cpp
+add_executable(informed_rrt_star_planner_node
+  src/informed_rrt_star_planner_node.cpp 
+  src/informed_rrt_star_replan_fsm.cpp
   src/planner_manager.cpp
   )
-target_link_libraries(ego_planner_node 
+target_link_libraries(informed_rrt_star_planner_node 
   ${catkin_LIBRARIES}
   )
-#add_dependencies(ego_planner_node ${${PROJECT_NAME}_EXPORTED_TARGETS})
+#add_dependencies(informed_rrt_star_planner_node ${${PROJECT_NAME}_EXPORTED_TARGETS})
 
 add_executable(traj_server src/traj_server.cpp)
 target_link_libraries(traj_server ${catkin_LIBRARIES})

@@ -36,6 +36,11 @@ include_directories(
 
 add_library( path_searching
     src/informed_rrt_star.cpp
+    src/rrt_star_search.cpp
+    src/rrt_star_nearest.cpp
+    src/rrt_star_collision.cpp
+    src/rrt_star_sampling.cpp
+    src/rrt_star_tree_ops.cpp
     )
 target_link_libraries( path_searching
     ${catkin_LIBRARIES} 

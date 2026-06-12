@@ -1,7 +1,7 @@
 # ===== Catkin build artifacts =====
 /.catkin_tools/
 /.catkin_workspace
-/build/
+**/build/
 /devel/
 /install/
 /logs/

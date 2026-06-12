@@ -12,18 +12,18 @@
 #include <ros/ros.h>
 #include <traj_utils/planning_visualization.h>
 
-namespace ego_planner
+namespace informed_rrt_star_planner
 {
 
   // Fast Planner Manager
   // Key algorithms of mapping and planning are called
 
-  class EGOPlannerManager
+  class InformedRRTStarPlannerManager
   {
     // SECTION stable
   public:
-    EGOPlannerManager();
-    ~EGOPlannerManager();
+    InformedRRTStarPlannerManager();
+    ~InformedRRTStarPlannerManager();
 
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
@@ -76,10 +76,10 @@ namespace ego_planner
     // SECTION developing
 
   public:
-    typedef unique_ptr<EGOPlannerManager> Ptr;
+    typedef unique_ptr<InformedRRTStarPlannerManager> Ptr;
 
     // !SECTION
   };
-} // namespace ego_planner
+} // namespace informed_rrt_star_planner
 
 #endif

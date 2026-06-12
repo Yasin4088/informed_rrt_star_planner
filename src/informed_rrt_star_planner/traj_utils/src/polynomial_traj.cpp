@@ -9,7 +9,7 @@ PolynomialTraj PolynomialTraj::minSnapTraj(const Eigen::MatrixXd &Pos, const Eig
   /*
    * Segment durations from planner_manager are norm/max_vel based.
    * Slightly lengthen before solving min-snap yields gentler corners on the global reference,
-   * which aligns better with a longer local lookahead (EGO FSM getLocalTarget).
+   * which aligns better with a longer local lookahead (replan FSM getLocalTarget).
    */
   constexpr double kWaypointSegTimeComfortScale = 1.18;
   Eigen::VectorXd time_scaled = Time;

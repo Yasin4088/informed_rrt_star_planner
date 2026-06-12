@@ -1,7 +1,7 @@
 #include "bspline_opt/uniform_bspline.h"
 #include <ros/ros.h>
 
-namespace ego_planner
+namespace informed_rrt_star_planner
 {
 
   UniformBspline::UniformBspline(const Eigen::MatrixXd &points, const int &order,
@@ -374,4 +374,4 @@ namespace ego_planner
     mean_a = mean_acc;
     max_a = max_acc;
   }
-} // namespace ego_planner
+} // namespace informed_rrt_star_planner

@@ -18,7 +18,7 @@ geometry_msgs::Pose pose_cmd;
 double pos_gain[3] = {0, 0, 0};
 double vel_gain[3] = {0, 0, 0};
 
-using ego_planner::UniformBspline;
+using informed_rrt_star_planner::UniformBspline;
 
 bool receive_traj_ = false;
 vector<UniformBspline> traj_;

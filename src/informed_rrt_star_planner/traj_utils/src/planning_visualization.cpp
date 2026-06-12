@@ -2,7 +2,7 @@
 
 using std::cout;
 using std::endl;
-namespace ego_planner
+namespace informed_rrt_star_planner
 {
   PlanningVisualization::PlanningVisualization(ros::NodeHandle &nh)
   {
@@ -262,4 +262,4 @@ namespace ego_planner
   }
 
   // PlanningVisualization::
-} // namespace ego_planner
+} // namespace informed_rrt_star_planner

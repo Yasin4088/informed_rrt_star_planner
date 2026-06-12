@@ -24,10 +24,10 @@
 
 using std::vector;
 
-namespace ego_planner
+namespace informed_rrt_star_planner
 {
 
-  class EGOReplanFSM
+  class InformedRRTStarReplanFSM
   {
 
   private:
@@ -50,7 +50,7 @@ namespace ego_planner
     };
 
     /* planning utils */
-    EGOPlannerManager::Ptr planner_manager_;
+    InformedRRTStarPlannerManager::Ptr planner_manager_;
     PlanningVisualization::Ptr visualization_;
     traj_utils::DataDisp data_disp_;
     traj_utils::MultiBsplines multi_bspline_msgs_buf_;
@@ -106,7 +106,7 @@ namespace ego_planner
 
     /* return value: std::pair< Times of the same state be continuously called, current continuously called state > */
     void changeFSMExecState(FSM_EXEC_STATE new_state, string pos_call);
-    std::pair<int, EGOReplanFSM::FSM_EXEC_STATE> timesOfConsecutiveStateCalls();
+    std::pair<int, InformedRRTStarReplanFSM::FSM_EXEC_STATE> timesOfConsecutiveStateCalls();
     void printFSMExecState();
 
     void readGivenWps();
@@ -137,10 +137,10 @@ namespace ego_planner
     void publishSwarmTrajs(bool startup_pub);
 
   public:
-    EGOReplanFSM(/* args */)
+    InformedRRTStarReplanFSM(/* args */)
     {
     }
-    ~EGOReplanFSM()
+    ~InformedRRTStarReplanFSM()
     {
     }
 
@@ -149,6 +149,6 @@ namespace ego_planner
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
   };
 
-} // namespace ego_planner
+} // namespace informed_rrt_star_planner
 
 #endif
